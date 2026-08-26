@@ -814,11 +814,11 @@ function procesarDatos(rows){
 
   /* -------- Programa de Despacho: NV Por Despachar, A/P, una fila por línea (Código) -------- */
   const programaDespacho = vigentes
-    .filter(r => r.despachar === 'Si')
+    .filter(r => r.despachar === 'Si' && r.saldo > 0)
     .map(r => ({
       nv: r.nv, nvEstado: r.nvEstado, fechaEmis: r.fecha_dt, oc: r.oc,
       codigo: r.codigo, producto: r.producto, um: r.um, cliente: r.cliente,
-      vendedor: r.vendedor, qprog: r.qprog, fprogFecha: r.fprogFecha
+      vendedor: r.vendedor, saldo: r.saldo, qprog: r.qprog, fprogFecha: r.fprogFecha
     }))
     .sort((a,b)=>{
       const fa = a.fprogFecha ? a.fprogFecha.getTime() : Infinity;
@@ -1663,7 +1663,7 @@ function renderProgramaDespachoTabla(){
     document.getElementById('pdTable').innerHTML = `
       <thead><tr>
         <th>NV</th><th>OC</th><th>Fecha Emisión</th><th>Cliente</th><th>Código</th><th>Descripción</th><th>UM</th><th>Vendedor</th>
-        <th>Cantidad Programada (QPROG)</th><th>Fecha Programada (FPROG)</th>
+        <th>Saldo</th><th>Cantidad Programada (QPROG)</th><th>Fecha Programada (FPROG)</th>
       </tr></thead>
       <tbody>
         ${rows.map(r=>`<tr>
@@ -1675,6 +1675,7 @@ function renderProgramaDespachoTabla(){
           <td>${esc(r.producto)}</td>
           <td>${esc(r.um||'')}</td>
           <td>${esc(r.vendedor)}</td>
+          <td>${num(r.saldo)}</td>
           <td>${num(r.qprog)}</td>
           <td>${fprogCellHtml(r.fprogFecha)}</td>
         </tr>`).join('')}
@@ -1698,7 +1699,7 @@ function pdExportExcel(){
   const ws = XLSX.utils.json_to_sheet(base.map(r => ({
     'NV': r.nv, 'Estado NV': r.nvEstado, 'OC': r.oc||'', 'Fecha Emision': fmtFecha(r.fechaEmis),
     'Codigo': r.codigo, 'Descripcion': r.producto, 'UM': r.um||'', 'Cliente': r.cliente||'',
-    'Vendedor': r.vendedor, 'Cantidad Programada (QPROG)': r.qprog,
+    'Vendedor': r.vendedor, 'Saldo': r.saldo, 'Cantidad Programada (QPROG)': r.qprog,
     'Fecha Programada (FPROG)': r.fprogFecha ? fmtFecha(r.fprogFecha) : 'Sin programar'
   })));
   XLSX.utils.book_append_sheet(wb, ws, 'Programa Despacho');
