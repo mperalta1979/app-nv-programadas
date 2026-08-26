@@ -9,6 +9,8 @@
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --navy:#123a5c;
@@ -180,6 +182,11 @@
   }
   .footer-note{font-size:11.5px; color:var(--steel); padding:10px 16px 4px;}
   .assumption-note{font-size:11.5px; color:var(--yellow); background:var(--yellow-bg); padding:8px 12px; border-radius:6px; margin:0 16px 12px;}
+  .sync-badge{display:inline-block; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700; margin-bottom:10px;}
+  .sync-ok{background:var(--green-bg); color:var(--green);}
+  .sync-local{background:var(--yellow-bg); color:var(--yellow);}
+  .sync-cargando{background:var(--celeste); color:var(--navy);}
+  .sync-error{background:var(--red-bg); color:var(--red);}
 
   .empty{padding:34px 16px; text-align:center; color:var(--steel); font-size:13.5px;}
 
@@ -226,11 +233,16 @@
 
   <div class="tabs" id="mainTabs" style="background:#fff; border:1px solid var(--line); border-radius:10px; margin-bottom:16px; padding:10px 14px;"></div>
 
-  <div id="uploadbox" class="uploadbox">
+  <div id="syncStatusWrap"><span id="syncStatus" class="sync-badge sync-local">📴 Iniciando...</span></div>
+
+  <div id="uploadbox" class="uploadbox hidden">
     <button class="uploadbtn" id="btnPick">Cargar archivo de NV (VISTA / NV_PARA_CARGAR_A_REVISION.xlsx)</button>
     <input type="file" id="fileInput" accept=".xlsx,.xls">
-    <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Se procesa localmente en tu navegador — el archivo no se sube a ningún servidor. Al cargar uno nuevo, reemplaza automáticamente al anterior.</div>
+    <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
     <div class="filename" id="filename"></div>
+  </div>
+  <div id="esperandoDatosVendedor" class="hidden panel-body pad" style="background:#fff; border:1px solid var(--line); border-radius:10px; margin-bottom:16px; text-align:center; color:var(--steel); padding:20px;">
+    Esperando a que el Administrador cargue los datos de NV. Se van a mostrar automáticamente aquí apenas estén disponibles.
   </div>
   <div id="datosGuardadosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px; margin-bottom:16px; color:var(--navy-deep);"></div>
   <input type="file" id="importDatosInput" accept=".json" class="hidden">
@@ -406,6 +418,119 @@
 /* ============================================================
    CONTACTOS — correo y celular (formato wa.me) por vendedor
    ============================================================ */
+/* ============================================================
+   FIREBASE — sincronización del Excel entre todos los usuarios
+   ============================================================
+   PASOS PARA ACTIVARLO (una sola vez, los hace Marcelo):
+   1. Ir a https://console.firebase.google.com → "Agregar proyecto"
+      (plan gratuito "Spark", no pide tarjeta).
+   2. Dentro del proyecto: menú izquierdo → "Firestore Database" →
+      "Crear base de datos" → modo "producción" → cualquier región
+      (ej. nam5 / us-central).
+   3. En Firestore → pestaña "Reglas", pega esto y publica:
+
+        rules_version = '2';
+        service cloud.firestore {
+          match /databases/{database}/documents {
+            match /nv_programadas/{doc} {
+              allow read: if true;
+              allow write: if request.resource.data.claveAdmin == "petroflex-nv-2026";
+            }
+          }
+        }
+
+      (El "claveAdmin" es un candado simple a nivel de app, no es
+      seguridad real de nivel empresarial — igual que las claves de
+      usuario, cualquiera que mire el código fuente podría verla.
+      Sirve para que nadie externo pueda escribir por accidente.)
+
+   4. En el proyecto → ⚙️ "Configuración del proyecto" → bajar hasta
+      "Tus apps" → ícono "</>" (Web) → registrar una app (nombre
+      cualquiera, sin Hosting). Copia el objeto "firebaseConfig" que
+      te muestra y pégalo reemplazando el de abajo.
+   ============================================================ */
+const FIREBASE_CONFIG = {
+  apiKey: "TU_API_KEY_AQUI",
+  authDomain: "TU_PROYECTO.firebaseapp.com",
+  projectId: "TU_PROYECTO",
+  storageBucket: "TU_PROYECTO.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "TU_APP_ID_AQUI"
+};
+const FIREBASE_ADMIN_KEY = "petroflex-nv-2026"; // debe coincidir con la regla de Firestore de arriba
+
+let firebaseDb = null;
+let firebaseListo = false;
+let firebaseUnsub = null;
+try{
+  if(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== "TU_API_KEY_AQUI"){
+    firebase.initializeApp(FIREBASE_CONFIG);
+    firebaseDb = firebase.firestore();
+    firebaseListo = true;
+  }
+}catch(e){ console.warn('Firebase no se pudo inicializar:', e); }
+
+/* Solo se guardan/sincronizan las columnas que la app realmente usa,
+   para mantenerse bajo el límite de 1MB por documento de Firestore. */
+const COLUMNAS_UTILES = ['fecha_emis','Numero_NVenta','nvEstado','CodAux','NomAux','Bloqueado','VenDes',
+  'CodProd','DesProd','CodUMed','Saldo','Saldo$','QPROG','FPROG','Stock_2','Retira','Despachar',
+  'Retenida_Credito','Comuna_despacho','OPERACIÓN','NumOC'];
+function trimirFilas(rows){
+  return rows
+    .filter(r => r && (r['nvEstado']==='A' || r['nvEstado']==='P'))
+    .map(r => { const o={}; COLUMNAS_UTILES.forEach(c=>o[c]=r[c]!==undefined?r[c]:null); return o; });
+}
+
+function actualizarEstadoSync(estado, detalle){
+  const el = document.getElementById('syncStatus');
+  if(!el) return;
+  const iconos = {ok:'☁️', local:'📴', cargando:'⏳', error:'⚠️'};
+  el.textContent = `${iconos[estado]||''} ${detalle||''}`;
+  el.className = 'sync-badge sync-' + estado;
+}
+
+function guardarDatosEnNube(rows, filename){
+  if(!firebaseListo){ actualizarEstadoSync('local', 'Firebase no configurado — datos solo en este navegador'); return Promise.resolve(false); }
+  const trimmed = trimirFilas(rows);
+  actualizarEstadoSync('cargando', 'Subiendo a la nube...');
+  return firebaseDb.collection('nv_programadas').doc('actual').set({
+    rows: trimmed,
+    filename,
+    savedAt: new Date().toISOString(),
+    subidoPor: sesion ? sesion.username : 'desconocido',
+    claveAdmin: FIREBASE_ADMIN_KEY
+  }).then(() => {
+    actualizarEstadoSync('ok', 'Sincronizado con la nube');
+    return true;
+  }).catch(err => {
+    console.error('Error subiendo a Firebase:', err);
+    actualizarEstadoSync('error', 'No se pudo subir a la nube (revisa tu conexión)');
+    return false;
+  });
+}
+
+function suscribirseADatosNube(){
+  if(!firebaseListo){ actualizarEstadoSync('local', 'Firebase no configurado — usando datos guardados en este navegador'); return; }
+  actualizarEstadoSync('cargando', 'Conectando con la nube...');
+  if(firebaseUnsub) firebaseUnsub();
+  firebaseUnsub = firebaseDb.collection('nv_programadas').doc('actual').onSnapshot(doc => {
+    if(!doc.exists){ actualizarEstadoSync('local', 'Aún no hay datos cargados en la nube'); return; }
+    const data = doc.data();
+    if(!data.rows || !data.rows.length){ actualizarEstadoSync('local', 'Aún no hay datos cargados en la nube'); return; }
+    // Cache local por si se pierde la conexión más adelante
+    try{ localStorage.setItem(DATOS_KEY, JSON.stringify({rows:data.rows, filename:data.filename, savedAt:data.savedAt})); }catch(e){}
+    RESULT = procesarDatos(data.rows);
+    document.getElementById('filename').textContent = data.filename || '';
+    mostrarInfoDatosGuardados(data.filename || '(sin nombre)', data.savedAt);
+    document.getElementById('esperandoDatosVendedor').classList.add('hidden');
+    actualizarEstadoSync('ok', `Sincronizado (${data.subidoPor||'admin'} · ${fmtFecha(new Date(data.savedAt))})`);
+    if(sesion) render();
+  }, err => {
+    console.warn('Error escuchando Firebase, usando datos locales:', err);
+    actualizarEstadoSync('error', 'Sin conexión a la nube — usando datos locales guardados');
+  });
+}
+
 const CONTACTOS = {
   'BASCUÑAN Z. ROSA':      [{nombre:'ROSITA BASCUÑAN', email:'rbascunan@petroflex.cl', cel:'56982301190'}],
   'TORO L. VIRGINIA':      [{nombre:'VIRGINIA TORO', email:'vtoro@petroflex.cl', cel:'56982301188'}],
@@ -1271,6 +1396,8 @@ function intentarLogin(){
 function logout(){
   sesion = null;
   tabActivo = null;
+  RESULT = null;
+  if(firebaseUnsub){ firebaseUnsub(); firebaseUnsub = null; }
   document.getElementById('loginWrap').classList.remove('hidden');
   document.getElementById('mainWrap').classList.add('hidden');
   document.getElementById('sesionBar').classList.add('hidden');
@@ -1283,6 +1410,10 @@ function aplicarSesion(){
   document.getElementById('sesionBar').classList.remove('hidden');
   document.getElementById('sesionLabel').textContent = `${sesion.username} · ${ROLE_LABELS[sesion.role]||sesion.role}`;
 
+  const esAdmin = sesion.role === 'admin';
+  document.getElementById('uploadbox').classList.toggle('hidden', !esAdmin);
+
+  // Mientras llega la respuesta de Firebase, se usa el cache local como respaldo inmediato
   if(!RESULT){
     const guardado = cargarDatosGuardados();
     if(guardado && guardado.rows && guardado.rows.length){
@@ -1291,6 +1422,9 @@ function aplicarSesion(){
       mostrarInfoDatosGuardados(guardado.filename || '(archivo guardado)', guardado.savedAt);
     }
   }
+  document.getElementById('esperandoDatosVendedor').classList.toggle('hidden', !!RESULT || esAdmin);
+
+  suscribirseADatosNube();
 
   renderTabsNav();
   if(sesion.role === 'admin') renderUsersTable();
@@ -1743,8 +1877,11 @@ function cargarDatosGuardados(){
 }
 
 function borrarDatosGuardados(){
-  if(!confirm('¿Borrar los datos cargados guardados en este navegador? Tendrás que volver a subir el Excel.')) return;
+  if(!confirm('¿Borrar los datos cargados? Esto los borra para TODOS los usuarios sincronizados, no solo en este navegador. Tendrás que volver a subir el Excel.')) return;
   localStorage.removeItem(DATOS_KEY);
+  if(firebaseListo){
+    firebaseDb.collection('nv_programadas').doc('actual').delete().catch(err=>console.warn('No se pudo borrar en la nube:', err));
+  }
   RESULT = null;
   document.getElementById('filename').textContent = '';
   document.getElementById('datosGuardadosInfo').classList.add('hidden');
@@ -1811,6 +1948,7 @@ function handleFile(file){
     RESULT = procesarDatos(rows);
     guardarDatosCargados(rows, file.name);
     mostrarInfoDatosGuardados(file.name, new Date().toISOString());
+    guardarDatosEnNube(rows, file.name); // sincroniza para todos los usuarios
     currentVendor = null;
     currentTipo = 'Retira Cliente';
     render();
