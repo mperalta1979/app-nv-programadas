@@ -1,0 +1,1838 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>APP Análisis NV Programadas — Petroflex</title>
+<meta name="theme-color" content="#0b2740">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --navy:#123a5c;
+    --navy-deep:#0b2740;
+    --celeste:#e8f1f8;
+    --celeste-line:#c9dcec;
+    --steel:#4a6f8a;
+    --accent:#e8823c;
+    --green:#1e8e5a;
+    --green-bg:#e3f5ec;
+    --yellow:#a9720a;
+    --yellow-bg:#fdf1dc;
+    --red:#b3352b;
+    --red-bg:#fbe6e3;
+    --blue:#2e75b6;
+    --blue-bg:#e5f0fa;
+    --ink:#1c2b36;
+    --paper:#fbfbf9;
+    --line:#dfe4e8;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family: "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  .topbar{
+    background:linear-gradient(135deg,var(--navy-deep),var(--navy) 65%);
+    color:#fff;
+    padding:22px 28px 26px;
+    position:relative;
+    overflow:hidden;
+  }
+  .topbar::after{
+    content:"";
+    position:absolute; right:-40px; top:-60px; width:220px; height:220px;
+    border:22px solid rgba(255,255,255,.06);
+    border-radius:50%;
+  }
+  .topbar::before{
+    content:"";
+    position:absolute; right:60px; bottom:-70px; width:140px; height:140px;
+    border:16px solid rgba(232,130,60,.15);
+    border-radius:50%;
+  }
+  .brand{display:flex; align-items:baseline; gap:10px; position:relative; z-index:1;}
+  .brand .mark{
+    font-weight:800; letter-spacing:.5px; font-size:13px;
+    background:var(--accent); color:#fff; padding:3px 9px; border-radius:3px;
+  }
+  h1{margin:10px 0 2px; font-size:22px; font-weight:700; position:relative; z-index:1;}
+  .subtitle{color:#c9d9e6; font-size:13.5px; position:relative; z-index:1; max-width:680px;}
+
+  .wrap{max-width:1360px; margin:0 auto; padding:24px 20px 60px;}
+
+  .uploadbox{
+    border:2px dashed var(--celeste-line);
+    background:#fff;
+    border-radius:10px;
+    padding:26px;
+    display:flex; align-items:center; gap:18px; flex-wrap:wrap;
+    margin-bottom:22px;
+  }
+  .uploadbox.drag{ border-color:var(--accent); background:#fff7f0; }
+  .uploadbtn{
+    background:var(--navy); color:#fff; border:none; padding:11px 18px;
+    border-radius:6px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .uploadbtn:hover{background:var(--navy-deep);}
+  .uploadhint{color:var(--steel); font-size:13px; flex:1; min-width:220px;}
+  #fileInput{display:none;}
+  .filename{font-size:13px; color:var(--ink); font-weight:600;}
+
+  .hidden{display:none !important;}
+
+  .section-title{
+    font-size:13px; text-transform:uppercase; letter-spacing:.07em; font-weight:800;
+    color:var(--steel); margin:26px 0 10px;
+  }
+  .section-title:first-child{margin-top:0;}
+
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:12px; margin-bottom:8px;}
+  .card{
+    background:#fff; border:1px solid var(--line); border-radius:10px;
+    padding:14px 16px; position:relative; overflow:hidden;
+  }
+  .card .label{font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--steel); font-weight:700;}
+  .card .value{font-size:23px; font-weight:800; margin-top:4px; color:var(--navy-deep);}
+  .card.green .value{color:var(--green);}
+  .card.yellow .value{color:var(--yellow);}
+  .card.red .value{color:var(--red);}
+  .card.blue .value{color:var(--blue);}
+  .card .sub{font-size:11px; color:var(--steel); margin-top:2px;}
+
+  .panel{background:#fff; border:1px solid var(--line); border-radius:10px; margin-bottom:20px; overflow:hidden;}
+  .panel-head{
+    padding:13px 16px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;
+    background:var(--celeste);
+  }
+  .panel-head h2{margin:0; font-size:15px; color:var(--navy-deep);}
+  .panel-body{padding:0;}
+  .panel-body.pad{padding:14px 16px;}
+
+  .warn-panel .panel-head{background:var(--red-bg);}
+  .warn-panel h2{color:var(--red);}
+
+  table{width:100%; border-collapse:collapse; font-size:12.6px;}
+  thead th{
+    position:sticky; top:0;
+    background:var(--navy); color:#fff; text-align:left;
+    padding:9px 10px; font-weight:600; white-space:nowrap;
+  }
+  tbody td{padding:8px 10px; border-bottom:1px solid var(--line); white-space:nowrap;}
+  tbody tr:hover{background:#f5f8fb;}
+  tbody tr.totalrow{font-weight:800; background:#f5f8fb;}
+  .tablewrap{max-height:520px; overflow:auto;}
+
+  .tag{display:inline-block; padding:1px 7px; border-radius:20px; font-size:11px; font-weight:700; margin-left:5px;}
+  .tag-A{background:#dcecff; color:#0d5bb5;}
+  .tag-P{background:#fde7c8; color:#a15a00;}
+
+  .badge{display:inline-block; padding:3px 9px; border-radius:20px; font-size:11.5px; font-weight:700;}
+  .badge-completo{background:var(--green-bg); color:var(--green);}
+  .badge-parcial{background:var(--yellow-bg); color:var(--yellow);}
+  .badge-no{background:var(--red-bg); color:var(--red);}
+  .badge-bloq{background:var(--red-bg); color:var(--red);}
+  .badge-retira{background:var(--blue-bg); color:var(--blue);}
+  .badge-despacha{background:#f1e9fb; color:#6a3fa0;}
+
+  .tabs{display:flex; flex-wrap:wrap; gap:6px; padding:12px 16px; border-bottom:1px solid var(--line); background:#fff;}
+  .tab{
+    padding:7px 13px; border-radius:20px; font-size:12.5px; font-weight:600;
+    background:var(--celeste); color:var(--navy-deep); cursor:pointer; border:1px solid transparent;
+  }
+  .tab.active{background:var(--navy); color:#fff;}
+  .tab .count{opacity:.75; font-weight:500;}
+
+  .seg{display:flex; gap:0; padding:0 16px 12px; }
+  .seg button{
+    border:1px solid var(--celeste-line); background:#fff; color:var(--navy-deep);
+    padding:7px 16px; font-size:12.5px; font-weight:700; cursor:pointer;
+  }
+  .seg button:first-child{border-radius:6px 0 0 6px;}
+  .seg button:last-child{border-radius:0 6px 6px 0; border-left:none;}
+  .seg button.active{background:var(--navy); color:#fff; border-color:var(--navy);}
+
+  .vendor-actions{display:flex; gap:8px; flex-wrap:wrap; padding:0 16px 12px;}
+  .btn{
+    border:none; border-radius:6px; padding:8px 14px; font-size:12.8px; font-weight:700;
+    cursor:pointer; color:#fff; display:inline-flex; align-items:center; gap:6px; text-decoration:none;
+  }
+  .btn-mail{background:#2e75b6;}
+  .btn-mail:hover{background:#255f97;}
+  .btn-wa{background:#25d366;}
+  .btn-wa:hover{background:#1fb457;}
+  .btn-export{background:var(--navy);}
+  .btn-export:hover{background:var(--navy-deep);}
+  .btn-ghost{background:#fff; color:var(--navy); border:1px solid var(--celeste-line);}
+  .btn-ghost:hover{background:var(--celeste);}
+  .btn[disabled]{opacity:.45; cursor:not-allowed;}
+  .pending-note{background:var(--red-bg); color:var(--red); font-size:11.5px; padding:6px 10px; border-radius:6px; font-weight:600;}
+
+  .toolbar{display:flex; gap:10px; align-items:center; padding:12px 16px; flex-wrap:wrap;}
+  .search{
+    flex:1; min-width:200px; padding:8px 12px; border:1px solid var(--line); border-radius:6px; font-size:13px;
+  }
+  .footer-note{font-size:11.5px; color:var(--steel); padding:10px 16px 4px;}
+  .assumption-note{font-size:11.5px; color:var(--yellow); background:var(--yellow-bg); padding:8px 12px; border-radius:6px; margin:0 16px 12px;}
+
+  .empty{padding:34px 16px; text-align:center; color:var(--steel); font-size:13.5px;}
+
+  @media (max-width:640px){
+    thead th, tbody td{padding:7px 8px;}
+    .wrap{padding:16px 12px 40px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="mark">PETROFLEX</span><span style="opacity:.8; font-size:13px;">Logística &amp; Despacho</span></div>
+  <h1>APP Análisis NV Programadas</h1>
+  <div class="subtitle">Visión de NV vigentes (Aprobadas/Pendientes): estado, programación, tipo de despacho y cobertura de stock disponible por código para Retira Cliente y Por Despachar.</div>
+  <div id="sesionBar" class="hidden" style="position:relative; z-index:1; margin-top:12px; display:flex; align-items:center; gap:10px; font-size:12.5px;">
+    <span style="background:rgba(255,255,255,.15); padding:4px 10px; border-radius:20px;" id="sesionLabel"></span>
+    <button id="btnLogout" style="background:rgba(255,255,255,.15); border:none; color:#fff; padding:4px 10px; border-radius:20px; font-size:12.5px; cursor:pointer; font-weight:600;">Cerrar sesión</button>
+  </div>
+</div>
+
+<div class="wrap" id="loginWrap">
+  <div class="panel" style="max-width:420px; margin:40px auto;">
+    <div class="panel-head"><h2>🔒 Iniciar sesión</h2></div>
+    <div class="panel-body pad">
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px; font-weight:700; color:var(--steel); display:block; margin-bottom:4px;">Usuario</label>
+        <select id="loginUserSelect" style="width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:6px; font-size:13.5px;"></select>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px; font-weight:700; color:var(--steel); display:block; margin-bottom:4px;">Contraseña</label>
+        <div style="position:relative;">
+          <input type="password" id="loginPassInput" style="width:100%; padding:9px 34px 9px 10px; border:1px solid var(--line); border-radius:6px; font-size:13.5px;" placeholder="••••••••">
+          <button type="button" id="loginPassToggle" style="position:absolute; right:6px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:15px; padding:2px 4px;" title="Mostrar/ocultar contraseña">👁️</button>
+        </div>
+      </div>
+      <button class="btn btn-export" id="loginBtn" style="width:100%; justify-content:center;">Entrar</button>
+      <div id="loginError" style="color:var(--red); font-size:12.5px; margin-top:10px; font-weight:600;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap hidden" id="mainWrap">
+
+  <div class="tabs" id="mainTabs" style="background:#fff; border:1px solid var(--line); border-radius:10px; margin-bottom:16px; padding:10px 14px;"></div>
+
+  <div id="uploadbox" class="uploadbox">
+    <button class="uploadbtn" id="btnPick">Cargar archivo de NV (VISTA / NV_PARA_CARGAR_A_REVISION.xlsx)</button>
+    <input type="file" id="fileInput" accept=".xlsx,.xls">
+    <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Se procesa localmente en tu navegador — el archivo no se sube a ningún servidor. Al cargar uno nuevo, reemplaza automáticamente al anterior.</div>
+    <div class="filename" id="filename"></div>
+  </div>
+  <div id="datosGuardadosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px; margin-bottom:16px; color:var(--navy-deep);"></div>
+  <input type="file" id="importDatosInput" accept=".json" class="hidden">
+
+  <div id="tabMaestro" class="hidden">
+    <div id="adminPanel" class="panel">
+      <div class="panel-head">
+        <h2>👤 Gestión de Usuarios</h2>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost" id="btnRegenerarVendedores">↻ Regenerar usuarios vendedores</button>
+          <button class="btn btn-export" id="btnNuevoUsuario">+ Nuevo usuario</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="usersTable"></table>
+        </div>
+      </div>
+      <div class="footer-note">Los usuarios y roles se guardan en este navegador (localStorage). Usa "Exportar usuarios" para respaldarlos o pasarlos a otro computador con "Importar usuarios". "Regenerar usuarios vendedores" vuelve a crear los usuarios automáticos desde CONTACTOS (útil si cambiaste correos/celulares) sin tocar a los que creaste manualmente.</div>
+      <div style="display:flex; gap:8px; padding:0 16px 14px;">
+        <button class="btn btn-ghost" id="btnExportUsers">⬇ Exportar usuarios (JSON)</button>
+        <button class="btn btn-ghost" id="btnImportUsers">⬆ Importar usuarios (JSON)</button>
+        <input type="file" id="importUsersInput" accept=".json" class="hidden">
+      </div>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+
+    <div class="section-title">Dashboard general (NV, no líneas)</div>
+    <div class="cards" id="dashCards"></div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Gráfico — Dashboard General</h2></div>
+      <div class="panel-body pad">
+        <div style="display:flex; gap:14px; font-size:11.5px; margin-bottom:10px; color:var(--steel);">
+          <span><span style="display:inline-block; width:10px; height:10px; background:#2e75b6; border-radius:2px; margin-right:4px;"></span>Retira Cliente</span>
+          <span><span style="display:inline-block; width:10px; height:10px; background:#6a3fa0; border-radius:2px; margin-right:4px;"></span>Por Despachar</span>
+        </div>
+        <div style="overflow-x:auto;">
+          <svg id="dashChartSvg" width="100%" style="min-width:640px; display:block;"></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Dashboard por vendedor</h2></div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="dashVendorTable"></table>
+        </div>
+      </div>
+      <div class="assumption-note">Una NV se marca "Programada" si TODAS sus líneas tienen FPROG con fecha; "Prog. Parcial" si solo algunas la tienen; "No programada" si ninguna la tiene.</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Dashboard General por Operación</h2></div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="dashOperacionTable"></table>
+        </div>
+      </div>
+      <div class="assumption-note">Agrupa TODAS las NV vigentes (A/P) por el motivo de la columna OPERACIÓN (si una NV tiene líneas con motivos distintos, se agrupa bajo la combinación de todos). "Sin motivo / OPERACIÓN vacía" son NV sin ninguna razón documentada.</div>
+    </div>
+
+    <div class="panel warn-panel hidden" id="bloqueadosPanel">
+      <div class="panel-head"><h2>⚠ Clientes bloqueados detectados en NV vigentes (A/P) — excluidos del análisis de cobertura</h2></div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="bloqueadosTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>NV No Programadas — detalle por tipo y motivo</h2>
+      </div>
+      <div class="seg" id="noProgSeg">
+        <button data-tipo="Todos" class="active">Todos</button>
+        <button data-tipo="Retira Cliente">Retira Cliente</button>
+        <button data-tipo="Por Despachar">Por Despachar</button>
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="noProgTable"></table>
+        </div>
+      </div>
+      <div class="assumption-note">Motivo = valores de la columna OPERACIÓN de las líneas de esa NV (excluyendo "0"/vacío). Si una NV tiene líneas con motivos distintos, se listan todos separados por "/".</div>
+    </div>
+
+    <div class="section-title">Programable — cobertura de stock disponible</div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Resumen de cobertura por vendedor</h2>
+        <button class="btn btn-export" id="btnExportAll">⬇ Descargar Excel completo</button>
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="resumenVendedorTable"></table>
+        </div>
+      </div>
+      <div class="assumption-note">Solo entran a este análisis las líneas AÚN NO programadas (las programadas ya están descontadas del stock vía QPROG). El stock disponible de cada código se reparte primero entre Por Despachar no programadas (por fecha) y luego, con lo que sobra, entre Retira Cliente no programadas (por fecha).</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Análisis de cobertura por vendedor</h2></div>
+      <div class="tabs" id="vendorTabs"></div>
+      <div class="seg" id="tipoSeg">
+        <button data-tipo="Retira Cliente" class="active">Programable Retira Cliente</button>
+        <button data-tipo="Por Despachar">Programable Por Despachar</button>
+      </div>
+      <div class="vendor-actions" id="vendorActions"></div>
+      <div class="toolbar">
+        <input class="search" id="searchBox" placeholder="Buscar por código, producto, cliente o NV...">
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="vendorTable"></table>
+        </div>
+      </div>
+      <div class="footer-note" id="vendorFootnote"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>NV Retenidas por crédito (excluidas del análisis)</h2></div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="retenidasTable"></table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="tabDespacho" class="hidden">
+    <div class="section-title">Programa de Despacho por NV (solo Por Despachar, A/P)</div>
+
+    <div id="progDespachoPanel" class="panel">
+      <div class="panel-head">
+        <h2>📅 Programa de Despacho — <span id="pdSesionLabel"></span></h2>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-export" id="pdExportBtn">⬇ Exportar Excel</button>
+        </div>
+      </div>
+      <div class="toolbar" id="pdVendorFilterWrap">
+        <select id="pdVendedorFiltro" style="padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;"></select>
+        <select id="pdEstadoFiltro" style="padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;">
+          <option value="Todos">Todos los estados</option>
+          <option value="A">Solo Aprobadas</option>
+          <option value="P">Solo Pendientes</option>
+        </select>
+        <select id="pdProgFiltro" style="padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;">
+          <option value="Todos">Programadas y sin programar</option>
+          <option value="Si">Solo programadas</option>
+          <option value="No">Solo sin programar</option>
+        </select>
+        <input class="search" id="pdSearchBox" placeholder="Buscar por NV, OC, código, descripción, cliente o vendedor...">
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="pdTable"></table>
+        </div>
+      </div>
+      <div class="footer-note" id="pdFootnote"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============================================================
+   CONTACTOS — correo y celular (formato wa.me) por vendedor
+   ============================================================ */
+const CONTACTOS = {
+  'BASCUÑAN Z. ROSA':      [{nombre:'ROSITA BASCUÑAN', email:'rbascunan@petroflex.cl', cel:'56982301190'}],
+  'TORO L. VIRGINIA':      [{nombre:'VIRGINIA TORO', email:'vtoro@petroflex.cl', cel:'56982301188'}],
+  'MARTINEZ M. XIMENA':    [{nombre:'XIMENA MARTINEZ', email:'xmartinez@petroflex.cl', cel:'56977489188'}],
+  'NAVARRETE A. FERNANDO': [{nombre:'FERNANDO NAVARRETE', email:'fnavarrete@petroflex.cl', cel:'56995341598'}],
+  'MUNIZAGA R. MAURICIO':  [{nombre:'MAURICIO MUNIZAGA', email:'mmunizaga@petroflex.cl', cel:'56933871938'}],
+  'TORRES S. SEBASTIAN':   [{nombre:'SEBASTIAN TORRES', email:'storres@petroflex.cl', cel:'56926358418'}],
+  'VILCHES C. ADRIAN':     [{nombre:'ADRIAN VILCHES', email:'avilches@petroflex.cl', cel:'56921789795'}],
+  'UBILLA D. SERGIO':      [{nombre:'SERGIO UBILLA', email:'subilla@petroflex.cl', cel:'56982647056'}],
+  'FUENTES M. XIMENA':     [{nombre:'XIMENA FUENTES', email:'xfuentes@petroflex.cl', cel:'56994837895'}],
+  'DIAZ B. JAIME':         [{nombre:'JAIME DIAZ', email:'jdiaz@petroflex.cl', cel:'56994836703'}],
+  'ROA C. LILIAN':         [{nombre:'LILIAN ROA', email:'lroa@petroflex.cl', cel:'56986936703'}],
+  'TORO J. JUAN':          [{nombre:'JUAN TORO', email:'juantoro@petroflex.cl', cel:'56999181229'}],
+  'OFICINA KAM RETAIL':    [{nombre:'KAM RETAIL', email:'eramirez@petroflex.cl', cel:'56975781328'}],
+  'SODIMAC EMPRESAS X.MARTINEZ': [{nombre:'XIMENA MARTINEZ', email:'xmartinez@petroflex.cl', cel:'56977489188'}],
+  'OFICINA PETROFLEX': [
+    {nombre:'OFICINA PETROFLEX (Asist. Comercial)', email:'cpalma@petroflex.cl', cel:'56975781329'},
+    {nombre:'OFICINA PETROFLEX (Asist. Comercial)', email:'hriveros@petroflex.cl', cel:'56975781338'},
+    {nombre:'OFICINA PETROFLEX (Ventas)', email:'lletelier@petroflex.cl', cel:'56979966663'},
+  ],
+  'EXPORTACION': [{nombre:'EXPORTACION (C. Palma)', email:'cpalma@petroflex.cl', cel:'56975781329'}],
+};
+
+const CODIGOS_EXCLUIDOS = ['999','9999999998'];
+
+/* ============================================================
+   USUARIOS Y ROLES
+   ============================================================ */
+const ROLES = ['admin','vendedor','gerencia_general','gerencia_comercial'];
+const ROLE_LABELS = {
+  admin:'Administrador', vendedor:'Vendedor',
+  gerencia_general:'Gerencia General', gerencia_comercial:'Gerencia Comercial'
+};
+const USERS_KEY = 'nvprog_usuarios_v2'; // v2: usernames formato inicial+apellido (ej. cpalma)
+
+function normalizarUsername(v){
+  return v.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // quita tildes
+    .replace(/ñ/g,'n')
+    .replace(/[^a-z0-9]+/g,'.')
+    .replace(/^\.+|\.+$/g,'');
+}
+function seedUsuarios(){
+  const users = [{ username:'admin', password:'petroflex1', role:'admin', vendedores:[] }];
+  const byUsername = {};
+  Object.keys(CONTACTOS).forEach(vendedorLabel => {
+    CONTACTOS[vendedorLabel].forEach(c => {
+      // username = inicial del nombre + primer apellido, tomado del correo (ej. cpalma@petroflex.cl -> cpalma)
+      const username = c.email.split('@')[0].toLowerCase();
+      if(!byUsername[username]){
+        byUsername[username] = {
+          username, password: c.cel.slice(-4), role:'vendedor', vendedores: []
+        };
+        users.push(byUsername[username]);
+      }
+      if(!byUsername[username].vendedores.includes(vendedorLabel)){
+        byUsername[username].vendedores.push(vendedorLabel);
+      }
+    });
+  });
+  return users;
+}
+function pinDeVendedor(vendedor){
+  const c = CONTACTOS[vendedor];
+  if(!c || !c.length) return null;
+  return c[0].cel.slice(-4);
+}
+function cargarUsuarios(){
+  try{
+    const raw = localStorage.getItem(USERS_KEY);
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  const seeded = seedUsuarios();
+  guardarUsuarios(seeded);
+  return seeded;
+}
+function guardarUsuarios(users){
+  try{ localStorage.setItem(USERS_KEY, JSON.stringify(users)); }catch(e){}
+}
+let USERS = cargarUsuarios();
+let sesion = null; // {username, role, vendedor}
+
+let RESULT = null;
+let currentVendor = null;
+let currentTipo = 'Retira Cliente';
+let currentSearch = '';
+let currentNoProgTipo = 'Todos';
+let pdSearch = '';
+let pdVendedorFiltro = '__TODOS__';
+let pdEstadoFiltro = 'Todos';
+let pdProgFiltro = 'Todos';
+
+/* ============================================================
+   Utilidades
+   ============================================================ */
+function parseFechaDDMMYYYY(s){
+  if(!s) return null;
+  if(s instanceof Date) return (s.getFullYear() <= 1900) ? null : s;
+  const str = String(s).trim();
+  const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(m){
+    let [_, d, mo, y] = m;
+    if(y.length===2) y = '20'+y;
+    if(parseInt(d)===0 || parseInt(mo)===0 || parseInt(y)<=1900) return null; // fechas basura tipo 00/01/1900
+    return new Date(parseInt(y), parseInt(mo)-1, parseInt(d));
+  }
+  const d2 = new Date(str);
+  if(isNaN(d2) || d2.getFullYear() <= 1900) return null;
+  return d2;
+}
+function excelSerialToDate(v){
+  if(v===null || v===undefined || v==='' || isNaN(Number(v))) return null;
+  const n = Number(v);
+  if(n <= 1) return null; // 0 o 1 = sin fecha real (placeholder), nunca una fecha válida de negocio
+  const d = new Date(Date.UTC(1899,11,30) + n*86400000);
+  if(d.getUTCFullYear() <= 1900) return null; // resguardo extra por si el serial es basura
+  return d;
+}
+function fmtFecha(d){
+  if(!d) return '';
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+function money(n){
+  if(n===null || n===undefined || isNaN(n)) return '-';
+  const neg = n<0;
+  const v = Math.round(Math.abs(n)).toLocaleString('es-CL');
+  return (neg?'-':'') + '$' + v;
+}
+function num(n){
+  if(n===null || n===undefined || isNaN(n)) return '0';
+  return Math.round(n).toLocaleString('es-CL');
+}
+function esc(s){
+  return String(s===undefined || s===null ? '' : s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ============================================================
+   Procesamiento principal
+   ============================================================ */
+function procesarDatos(rows){
+  const clean = rows.map(r => ({
+    fecha_emis: r['fecha_emis'],
+    fecha_dt: parseFechaDDMMYYYY(r['fecha_emis']),
+    nv: r['Numero_NVenta'],
+    nvEstado: (r['nvEstado']||'').toString().trim(),
+    codAux: r['CodAux'],
+    cliente: r['NomAux'],
+    bloqueado: (r['Bloqueado']||'N').toString().trim(),
+    vendedor: (r['VenDes']||'').toString().trim(),
+    codigo: (r['CodProd']||'').toString().trim(),
+    producto: r['DesProd'],
+    um: r['CodUMed'],
+    oc: r['NumOC'],
+    saldo: Number(r['Saldo'])||0,
+    saldoValor: Number(r['Saldo$'])||0,
+    qprog: Number(r['QPROG'])||0,
+    fprog: Number(r['FPROG'])||0,
+    fprogFecha: excelSerialToDate(r['FPROG']),
+    programada: excelSerialToDate(r['FPROG']) !== null,
+    operacion: r['OPERACIÓN'],
+    stock2: (r['Stock_2']===undefined || r['Stock_2']===null || r['Stock_2']==='') ? null : Number(r['Stock_2']),
+    retira: (r['Retira']||'').toString().trim(),
+    despachar: (r['Despachar']||'').toString().trim(),
+    retenida: (r['Retenida_Credito']||'').toString().trim(),
+    comuna: r['Comuna_despacho'],
+  })).filter(r => r.nv !== undefined && r.nv !== null && r.codigo !== '');
+
+  const vigentes = clean.filter(r =>
+    (r.nvEstado === 'A' || r.nvEstado === 'P') &&
+    !CODIGOS_EXCLUIDOS.includes(r.codigo)
+  );
+
+  const bloqueados = vigentes.filter(r => r.bloqueado === 'S');
+  const disponibles = vigentes.filter(r => r.bloqueado !== 'S');
+
+  /* -------- Dashboard a nivel de NV (única fila por Numero_NVenta) -------- */
+  const nvMap = {};
+  vigentes.forEach(r => {
+    if(!nvMap[r.nv]){
+      nvMap[r.nv] = {
+        nv:r.nv, nvEstado:r.nvEstado, vendedor:r.vendedor, cliente:r.cliente,
+        bloqueado:r.bloqueado, retenida:r.retenida, retira:r.retira, despachar:r.despachar,
+        lineasTotal:0, lineasProgramadas:0, motivos:new Set(), valorSaldo:0
+      };
+    }
+    nvMap[r.nv].lineasTotal++;
+    if(r.programada) nvMap[r.nv].lineasProgramadas++;
+    nvMap[r.nv].valorSaldo += r.saldoValor;
+    const op = (r.operacion===undefined||r.operacion===null) ? '' : String(r.operacion).trim();
+    if(op && op!=='0') nvMap[r.nv].motivos.add(op);
+  });
+  const nvList = Object.values(nvMap).map(n => {
+    n.estadoProg = n.lineasProgramadas === 0 ? 'No programada'
+                 : n.lineasProgramadas === n.lineasTotal ? 'Programada'
+                 : 'Prog. Parcial';
+    n.tipo = n.retira === 'Si' ? 'Retira Cliente' : (n.despachar === 'Si' ? 'Por Despachar' : '(sin tipo)');
+    n.motivo = [...n.motivos].join(' / ');
+    return n;
+  });
+
+  const noProgramadasNV = nvList.filter(n=>n.estadoProg==='No programada');
+
+  const sumValor = arr => arr.reduce((s,n)=>s+n.valorSaldo,0);
+
+  const dashboard = {
+    totalNV: nvList.length,
+    totalValor: sumValor(nvList),
+    aprobadas: nvList.filter(n=>n.nvEstado==='A').length,
+    aprobadasValor: sumValor(nvList.filter(n=>n.nvEstado==='A')),
+    pendientes: nvList.filter(n=>n.nvEstado==='P').length,
+    pendientesValor: sumValor(nvList.filter(n=>n.nvEstado==='P')),
+    programadas: nvList.filter(n=>n.estadoProg==='Programada').length,
+    programadasValor: sumValor(nvList.filter(n=>n.estadoProg==='Programada')),
+    progParcial: nvList.filter(n=>n.estadoProg==='Prog. Parcial').length,
+    progParcialValor: sumValor(nvList.filter(n=>n.estadoProg==='Prog. Parcial')),
+    noProgramadas: noProgramadasNV.length,
+    noProgramadasValor: sumValor(noProgramadasNV),
+    noProgRetira: noProgramadasNV.filter(n=>n.tipo==='Retira Cliente').length,
+    noProgRetiraValor: sumValor(noProgramadasNV.filter(n=>n.tipo==='Retira Cliente')),
+    noProgDespacho: noProgramadasNV.filter(n=>n.tipo==='Por Despachar').length,
+    noProgDespachoValor: sumValor(noProgramadasNV.filter(n=>n.tipo==='Por Despachar')),
+    retiraCliente: nvList.filter(n=>n.retira==='Si').length,
+    retiraClienteValor: sumValor(nvList.filter(n=>n.retira==='Si')),
+    porDespachar: nvList.filter(n=>n.despachar==='Si').length,
+    porDespacharValor: sumValor(nvList.filter(n=>n.despachar==='Si')),
+    retenidas: nvList.filter(n=>n.retenida==='Si').length,
+    retenidasValor: sumValor(nvList.filter(n=>n.retenida==='Si')),
+    retenidasRetira: nvList.filter(n=>n.retenida==='Si' && n.tipo==='Retira Cliente').length,
+    retenidasRetiraValor: sumValor(nvList.filter(n=>n.retenida==='Si' && n.tipo==='Retira Cliente')),
+    retenidasDespacho: nvList.filter(n=>n.retenida==='Si' && n.tipo==='Por Despachar').length,
+    retenidasDespachoValor: sumValor(nvList.filter(n=>n.retenida==='Si' && n.tipo==='Por Despachar')),
+    bloqueadas: nvList.filter(n=>n.bloqueado==='S').length,
+    bloqueadasValor: sumValor(nvList.filter(n=>n.bloqueado==='S')),
+  };
+
+  const porVendedorMap = {};
+  nvList.forEach(n => {
+    const v = n.vendedor || '(sin vendedor)';
+    if(!porVendedorMap[v]) porVendedorMap[v] = {
+      vendedor:v, total:0, totalValor:0, aprobadas:0, aprobadasValor:0, pendientes:0, pendientesValor:0,
+      programadas:0, programadasValor:0, progParcial:0, progParcialValor:0,
+      noProgramadas:0, noProgramadasValor:0, noProgRetira:0, noProgRetiraValor:0, noProgDespacho:0, noProgDespachoValor:0,
+      retiraCliente:0, retiraClienteValor:0, porDespachar:0, porDespacharValor:0,
+      retenidas:0, retenidasValor:0, bloqueadas:0, bloqueadasValor:0
+    };
+    const p = porVendedorMap[v];
+    p.total++; p.totalValor += n.valorSaldo;
+    if(n.nvEstado==='A'){ p.aprobadas++; p.aprobadasValor += n.valorSaldo; }
+    else if(n.nvEstado==='P'){ p.pendientes++; p.pendientesValor += n.valorSaldo; }
+    if(n.estadoProg==='Programada'){ p.programadas++; p.programadasValor += n.valorSaldo; }
+    else if(n.estadoProg==='Prog. Parcial'){ p.progParcial++; p.progParcialValor += n.valorSaldo; }
+    else {
+      p.noProgramadas++; p.noProgramadasValor += n.valorSaldo;
+      if(n.tipo==='Retira Cliente'){ p.noProgRetira++; p.noProgRetiraValor += n.valorSaldo; }
+      else if(n.tipo==='Por Despachar'){ p.noProgDespacho++; p.noProgDespachoValor += n.valorSaldo; }
+    }
+    if(n.retira==='Si'){ p.retiraCliente++; p.retiraClienteValor += n.valorSaldo; }
+    if(n.despachar==='Si'){ p.porDespachar++; p.porDespacharValor += n.valorSaldo; }
+    if(n.retenida==='Si'){ p.retenidas++; p.retenidasValor += n.valorSaldo; }
+    if(n.bloqueado==='S'){ p.bloqueadas++; p.bloqueadasValor += n.valorSaldo; }
+  });
+  const dashboardPorVendedor = Object.values(porVendedorMap).sort((a,b)=>b.total-a.total);
+
+  /* -------- Agrupación por Operación (motivo) -------- */
+  const opGroupMap = {};
+  nvList.forEach(n => {
+    const key = n.motivo || '(Sin motivo / OPERACIÓN vacía)';
+    if(!opGroupMap[key]) opGroupMap[key] = {
+      operacion:key, cantidad:0, valor:0, noProgramadas:0, noProgramadasValor:0
+    };
+    opGroupMap[key].cantidad++;
+    opGroupMap[key].valor += n.valorSaldo;
+    if(n.estadoProg==='No programada'){
+      opGroupMap[key].noProgramadas++;
+      opGroupMap[key].noProgramadasValor += n.valorSaldo;
+    }
+  });
+  const dashboardPorOperacion = Object.values(opGroupMap).sort((a,b)=>b.valor-a.valor);
+
+  /* -------- Programa de Despacho: NV Por Despachar, A/P, una fila por línea (Código) -------- */
+  const programaDespacho = vigentes
+    .filter(r => r.despachar === 'Si')
+    .map(r => ({
+      nv: r.nv, nvEstado: r.nvEstado, fechaEmis: r.fecha_dt, oc: r.oc,
+      codigo: r.codigo, producto: r.producto, um: r.um, cliente: r.cliente,
+      vendedor: r.vendedor, qprog: r.qprog, fprogFecha: r.fprogFecha
+    }))
+    .sort((a,b)=>{
+      const fa = a.fprogFecha ? a.fprogFecha.getTime() : Infinity;
+      const fb = b.fprogFecha ? b.fprogFecha.getTime() : Infinity;
+      if(fa !== fb) return fa - fb;
+      return (a.nv||0) - (b.nv||0);
+    });
+
+  /* -------- Stock disponible por código -------- */
+  const stockPorCodigo = {};
+  const qprogPorCodigo = {};
+  const prodPorCodigo = {};
+  disponibles.forEach(r => {
+    if(!(r.codigo in stockPorCodigo) && r.stock2 !== null){
+      stockPorCodigo[r.codigo] = r.stock2;
+    }
+    qprogPorCodigo[r.codigo] = (qprogPorCodigo[r.codigo]||0) + r.qprog;
+    if(!(r.codigo in prodPorCodigo)) prodPorCodigo[r.codigo] = r.producto;
+  });
+  const stockDisponible = {};
+  Object.keys(stockPorCodigo).forEach(c => {
+    const disp = (stockPorCodigo[c]||0) - (qprogPorCodigo[c]||0);
+    stockDisponible[c] = Math.max(0, disp);
+  });
+  const stockArr = Object.keys(stockPorCodigo).map(c => ({
+    codigo:c, producto: prodPorCodigo[c],
+    stock2: stockPorCodigo[c], sumaQprog: qprogPorCodigo[c]||0,
+    stockDisponible: stockDisponible[c]
+  })).sort((a,b)=> a.codigo.localeCompare(b.codigo));
+
+  /* -------- Retenidas por crédito (documentadas, excluidas) -------- */
+  const retenidas = disponibles.filter(r => (r.retira === 'Si' || r.despachar === 'Si') && r.retenida === 'Si');
+
+  /* -------- Universo combinado: solo lineas SIN programar (las ya programadas
+     ya estan reflejadas en el descuento de QPROG del stock disponible) -------- */
+  const universo = disponibles.filter(r => (r.retira === 'Si' || r.despachar === 'Si') && r.retenida !== 'Si' && !r.programada && r.saldo > 0);
+
+  const porCodigo = {};
+  universo.forEach(r => {
+    if(!porCodigo[r.codigo]) porCodigo[r.codigo] = [];
+    porCodigo[r.codigo].push(r);
+  });
+
+  const analisis = [];
+  Object.keys(porCodigo).forEach(codigo => {
+    const filas = porCodigo[codigo].sort((a,b)=>{
+      // Prioridad: primero Por Despachar (ordenado por fecha), luego Retira Cliente (ordenado por fecha)
+      const tipoA = a.despachar === 'Si' ? 0 : 1;
+      const tipoB = b.despachar === 'Si' ? 0 : 1;
+      if(tipoA !== tipoB) return tipoA - tipoB;
+      const fa = a.fecha_dt ? a.fecha_dt.getTime() : 0;
+      const fb = b.fecha_dt ? b.fecha_dt.getTime() : 0;
+      if(fa !== fb) return fa - fb;
+      return (a.nv||0) - (b.nv||0);
+    });
+    let restante = stockDisponible[codigo] || 0;
+    filas.forEach(r => {
+      const precioUnit = r.saldo ? (r.saldoValor / r.saldo) : 0;
+      let estado, cantidadCubierta;
+      if(restante <= 0){
+        estado = 'No cubre'; cantidadCubierta = 0;
+      } else if(restante >= r.saldo){
+        estado = 'Cubre Completo'; cantidadCubierta = r.saldo; restante -= r.saldo;
+      } else {
+        estado = 'Cubre Parcial'; cantidadCubierta = restante; restante = 0;
+      }
+      const valorCubierto = Math.round(cantidadCubierta * precioUnit);
+      const valorSinCubrir = Math.round((r.saldo - cantidadCubierta) * precioUnit);
+      analisis.push({
+        codigo, producto: r.producto, nv: r.nv, nvEstado: r.nvEstado,
+        tipo: r.retira === 'Si' ? 'Retira Cliente' : 'Por Despachar',
+        fecha: r.fecha_dt, vendedor: r.vendedor, cliente: r.cliente, comuna: r.comuna,
+        operacion: r.operacion,
+        saldo: r.saldo, saldoValor: r.saldoValor,
+        stockDisponibleCodigo: stockDisponible[codigo]||0,
+        cantidadCubierta, valorCubierto,
+        saldoSinCubrir: r.saldo - cantidadCubierta, valorSinCubrir,
+        estado
+      });
+    });
+  });
+  analisis.sort((a,b)=>{
+    if(a.codigo !== b.codigo) return a.codigo.localeCompare(b.codigo);
+    const tipoA = a.tipo === 'Por Despachar' ? 0 : 1;
+    const tipoB = b.tipo === 'Por Despachar' ? 0 : 1;
+    if(tipoA !== tipoB) return tipoA - tipoB;
+    const fa = a.fecha ? a.fecha.getTime() : 0, fb = b.fecha ? b.fecha.getTime() : 0;
+    return fa - fb;
+  });
+
+  /* -------- Resumen por vendedor y tipo -------- */
+  function buildResumen(tipo){
+    const rows = analisis.filter(a=>a.tipo===tipo);
+    const map = {};
+    rows.forEach(a => {
+      if(!map[a.vendedor]) map[a.vendedor] = {
+        vendedor:a.vendedor, nvTotal:0, completo:0, parcial:0, noCubre:0, valorCubierto:0, valorSinCubrir:0
+      };
+      const r = map[a.vendedor];
+      r.nvTotal++;
+      if(a.estado==='Cubre Completo') r.completo++;
+      else if(a.estado==='Cubre Parcial') r.parcial++;
+      else r.noCubre++;
+      r.valorCubierto += a.valorCubierto;
+      r.valorSinCubrir += a.valorSinCubrir;
+    });
+    return Object.values(map).sort((a,b)=> b.valorCubierto - a.valorCubierto);
+  }
+  const resumenPorTipo = {
+    'Retira Cliente': buildResumen('Retira Cliente'),
+    'Por Despachar': buildResumen('Por Despachar'),
+  };
+
+  const vendedoresConDatos = [...new Set(analisis.map(a=>a.vendedor))].sort();
+
+  /* -------- NV sin programar por falta de stock (estado "No cubre"), por tipo -------- */
+  const noProgramadasSet = new Set(noProgramadasNV.map(n=>n.nv));
+  const nvValorMap = {};
+  nvList.forEach(n => { nvValorMap[n.nv] = n.valorSaldo; });
+
+  function sinStockPorTipo(tipo){
+    const noCubre = analisis.filter(a => a.tipo===tipo && a.estado==='No cubre' && noProgramadasSet.has(a.nv));
+    const nvsUnicas = new Set(noCubre.map(a=>a.nv));
+    const valor = [...nvsUnicas].reduce((s,nv)=>s+(nvValorMap[nv]||0),0);
+    return {cantidad: nvsUnicas.size, valor, nvSet: nvsUnicas};
+  }
+  const sinStockRetira = sinStockPorTipo('Retira Cliente');
+  const sinStockDespacho = sinStockPorTipo('Por Despachar');
+  dashboard.sinStockRetira = sinStockRetira.cantidad;
+  dashboard.sinStockRetiraValor = sinStockRetira.valor;
+  dashboard.sinStockDespacho = sinStockDespacho.cantidad;
+  dashboard.sinStockDespachoValor = sinStockDespacho.valor;
+  dashboard.sinStockTotal = sinStockRetira.cantidad + sinStockDespacho.cantidad;
+  dashboard.sinStockTotalValor = sinStockRetira.valor + sinStockDespacho.valor;
+
+  /* -------- NV sin programar por OTROS motivos (No programada, pero NO por falta de stock) -------- */
+  function otrosMotivosPorTipo(tipo, sinStockSet){
+    const nvs = noProgramadasNV.filter(n => n.tipo===tipo && !sinStockSet.has(n.nv));
+    return {cantidad: nvs.length, valor: sumValor(nvs)};
+  }
+  const otrosRetira = otrosMotivosPorTipo('Retira Cliente', sinStockRetira.nvSet);
+  const otrosDespacho = otrosMotivosPorTipo('Por Despachar', sinStockDespacho.nvSet);
+  dashboard.otrosMotivosRetira = otrosRetira.cantidad;
+  dashboard.otrosMotivosRetiraValor = otrosRetira.valor;
+  dashboard.otrosMotivosDespacho = otrosDespacho.cantidad;
+  dashboard.otrosMotivosDespachoValor = otrosDespacho.valor;
+  dashboard.otrosMotivosTotal = otrosRetira.cantidad + otrosDespacho.cantidad;
+  dashboard.otrosMotivosTotalValor = otrosRetira.valor + otrosDespacho.valor;
+
+  /* -------- Desglose por vendedor de sin-stock / otros-motivos -------- */
+  const porVendedorExtra = {};
+  dashboardPorVendedor.forEach(p => {
+    porVendedorExtra[p.vendedor] = p;
+    p.sinStockRetira = 0; p.sinStockRetiraValor = 0; p.sinStockDespacho = 0; p.sinStockDespachoValor = 0;
+    p.otrosMotivosRetira = 0; p.otrosMotivosRetiraValor = 0; p.otrosMotivosDespacho = 0; p.otrosMotivosDespachoValor = 0;
+  });
+  noProgramadasNV.forEach(n => {
+    const v = n.vendedor || '(sin vendedor)';
+    const p = porVendedorExtra[v];
+    if(!p) return;
+    if(n.tipo === 'Retira Cliente'){
+      if(sinStockRetira.nvSet.has(n.nv)){ p.sinStockRetira++; p.sinStockRetiraValor += n.valorSaldo; }
+      else { p.otrosMotivosRetira++; p.otrosMotivosRetiraValor += n.valorSaldo; }
+    } else if(n.tipo === 'Por Despachar'){
+      if(sinStockDespacho.nvSet.has(n.nv)){ p.sinStockDespacho++; p.sinStockDespachoValor += n.valorSaldo; }
+      else { p.otrosMotivosDespacho++; p.otrosMotivosDespachoValor += n.valorSaldo; }
+    }
+  });
+
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos };
+}
+
+/* ============================================================
+   Render
+   ============================================================ */
+function render(){
+  document.getElementById('app').classList.remove('hidden');
+  renderDashCards();
+  renderDashChart();
+  renderDashVendorTable();
+  renderDashOperacionTable();
+  renderBloqueados();
+  renderNoProgramadas();
+  renderResumenVendedor();
+  renderTabs();
+  renderRetenidas();
+  if(sesion){
+    renderTabsNav();
+    renderProgramaDespacho();
+  }
+  if(!currentVendor && RESULT.vendedoresConDatos.length){
+    currentVendor = RESULT.vendedoresConDatos[0];
+  }
+  renderVendorPanel();
+}
+
+function renderDashCards(){
+  const d = RESULT.dashboard;
+  const cards = [
+    {label:'NV totales (A/P)', value: d.totalNV, sub: money(d.totalValor)},
+    {label:'Aprobadas', value: d.aprobadas, cls:'blue', sub: money(d.aprobadasValor)},
+    {label:'Pendientes', value: d.pendientes, cls:'yellow', sub: money(d.pendientesValor)},
+    {label:'Programadas', value: d.programadas, cls:'green', sub: money(d.programadasValor)},
+    {label:'Prog. Parcial', value: d.progParcial, cls:'yellow', sub: money(d.progParcialValor)},
+    {label:'No programadas', value: d.noProgramadas, sub:`${money(d.noProgramadasValor)} · Retira: ${d.noProgRetira} (${money(d.noProgRetiraValor)}) · Despacho: ${d.noProgDespacho} (${money(d.noProgDespachoValor)})`},
+    {label:'NV sin programar por falta de stock', value: d.sinStockTotal, cls: d.sinStockTotal?'red':'', sub:`${money(d.sinStockTotalValor)} · Retira: ${d.sinStockRetira} (${money(d.sinStockRetiraValor)}) · Despacho: ${d.sinStockDespacho} (${money(d.sinStockDespachoValor)})`},
+    {label:'NV sin programar por otros motivos', value: d.otrosMotivosTotal, cls: d.otrosMotivosTotal?'yellow':'', sub:`${money(d.otrosMotivosTotalValor)} · Retira: ${d.otrosMotivosRetira} (${money(d.otrosMotivosRetiraValor)}) · Despacho: ${d.otrosMotivosDespacho} (${money(d.otrosMotivosDespachoValor)})`},
+    {label:'Retira Cliente', value: d.retiraCliente, cls:'blue', sub: money(d.retiraClienteValor)},
+    {label:'Por Despachar', value: d.porDespachar, cls:'blue', sub: money(d.porDespacharValor)},
+    {label:'Retenidas (crédito)', value: d.retenidas, cls: d.retenidas?'red':'', sub: `${money(d.retenidasValor)} · Retira: ${d.retenidasRetira} (${money(d.retenidasRetiraValor)}) · Despacho: ${d.retenidasDespacho} (${money(d.retenidasDespachoValor)})`},
+    {label:'Bloqueadas', value: d.bloqueadas, cls: d.bloqueadas?'red':'', sub: money(d.bloqueadasValor)},
+  ];
+  document.getElementById('dashCards').innerHTML = cards.map(c => `
+    <div class="card ${c.cls||''}">
+      <div class="label">${esc(c.label)}</div>
+      <div class="value">${c.value}</div>
+      ${c.sub? `<div class="sub">${esc(c.sub)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+function renderDashChart(){
+  const d = RESULT.dashboard;
+  const NAVY = '#1F4E78', GREEN = '#1e8e5a', YELLOW = '#a9720a', RED = '#b3352b';
+  const RETIRA = '#2e75b6', DESPACHO = '#6a3fa0';
+  const datos = [
+    {label:'Aprobadas', cantidad: d.aprobadas, valor: d.aprobadasValor, color: NAVY},
+    {label:'Pendientes', cantidad: d.pendientes, valor: d.pendientesValor, color: YELLOW},
+    {label:'Programadas', cantidad: d.programadas, valor: d.programadasValor, color: GREEN},
+    {label:'Prog. Parcial', cantidad: d.progParcial, valor: d.progParcialValor, color: YELLOW},
+    {label:'No prog. — Retira Cliente', cantidad: d.noProgRetira, valor: d.noProgRetiraValor, color: RETIRA},
+    {label:'No prog. — Por Despachar', cantidad: d.noProgDespacho, valor: d.noProgDespachoValor, color: DESPACHO},
+    {label:'Sin stock — Retira Cliente', cantidad: d.sinStockRetira, valor: d.sinStockRetiraValor, color: RETIRA},
+    {label:'Sin stock — Por Despachar', cantidad: d.sinStockDespacho, valor: d.sinStockDespachoValor, color: DESPACHO},
+    {label:'Otros mot. — Retira Cliente', cantidad: d.otrosMotivosRetira, valor: d.otrosMotivosRetiraValor, color: RETIRA},
+    {label:'Otros mot. — Por Despachar', cantidad: d.otrosMotivosDespacho, valor: d.otrosMotivosDespachoValor, color: DESPACHO},
+    {label:'Retira Cliente (total)', cantidad: d.retiraCliente, valor: d.retiraClienteValor, color: RETIRA},
+    {label:'Por Despachar (total)', cantidad: d.porDespachar, valor: d.porDespacharValor, color: DESPACHO},
+    {label:'Retenidas — Retira Cliente', cantidad: d.retenidasRetira, valor: d.retenidasRetiraValor, color: RETIRA},
+    {label:'Retenidas — Por Despachar', cantidad: d.retenidasDespacho, valor: d.retenidasDespachoValor, color: DESPACHO},
+    {label:'Bloqueadas', cantidad: d.bloqueadas, valor: d.bloqueadasValor, color: RED},
+  ];
+
+  const svg = document.getElementById('dashChartSvg');
+  const W = 940, rowH = 30, padTop = 10, padLeft = 190, padRight = 190;
+  const H = padTop + datos.length*rowH + 10;
+  const maxCant = Math.max(1, ...datos.map(x=>x.cantidad));
+  const barMaxW = W - padLeft - padRight;
+
+  let svgContent = '';
+  datos.forEach((x, i) => {
+    const y = padTop + i*rowH;
+    const barW = (x.cantidad / maxCant) * barMaxW;
+    svgContent += `
+      <text x="${padLeft-10}" y="${y+rowH/2+4}" text-anchor="end" font-size="11.5" font-family="Segoe UI, Arial" fill="#1c2b36">${esc(x.label)}</text>
+      <rect x="${padLeft}" y="${y+4}" width="${Math.max(barW,2)}" height="${rowH-12}" rx="3" fill="${x.color}"></rect>
+      <text x="${padLeft+barW+8}" y="${y+rowH/2+4}" font-size="12" font-family="Segoe UI, Arial" fill="#1c2b36" font-weight="700">${x.cantidad}</text>
+      <text x="${padLeft+barW+8+String(x.cantidad).length*8+6}" y="${y+rowH/2+4}" font-size="11" font-family="Segoe UI, Arial" fill="#4a6f8a">(${money(x.valor)})</text>
+    `;
+  });
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = svgContent;
+}
+
+function renderDashVendorTable(){
+  const rows = RESULT.dashboardPorVendedor;
+  const tot = k => rows.reduce((s,r)=>s+r[k],0);
+  document.getElementById('dashVendorTable').innerHTML = `
+    <thead><tr>
+      <th>Vendedor</th><th>Total NV</th><th>Aprobadas</th><th>Pendientes</th>
+      <th>Programadas</th><th>Prog. Parcial</th><th>No Prog. Retira</th><th>No Prog. Despacho</th>
+      <th>Sin Stock Retira</th><th>Sin Stock Despacho</th><th>Otros Mot. Retira</th><th>Otros Mot. Despacho</th>
+      <th>Retira Cliente</th><th>Por Despachar</th>
+      <th>Retenidas</th><th>Bloqueadas</th>
+    </tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${esc(r.vendedor)}</td>
+        <td>${r.total} <span style="color:var(--steel); font-size:11px;">(${money(r.totalValor)})</span></td>
+        <td>${r.aprobadas} <span style="color:var(--steel); font-size:11px;">(${money(r.aprobadasValor)})</span></td>
+        <td>${r.pendientes} <span style="color:var(--steel); font-size:11px;">(${money(r.pendientesValor)})</span></td>
+        <td>${r.programadas} <span style="color:var(--steel); font-size:11px;">(${money(r.programadasValor)})</span></td>
+        <td>${r.progParcial} <span style="color:var(--steel); font-size:11px;">(${money(r.progParcialValor)})</span></td>
+        <td>${r.noProgRetira} <span style="color:var(--steel); font-size:11px;">(${money(r.noProgRetiraValor)})</span></td>
+        <td>${r.noProgDespacho} <span style="color:var(--steel); font-size:11px;">(${money(r.noProgDespachoValor)})</span></td>
+        <td>${r.sinStockRetira||0} <span style="color:var(--steel); font-size:11px;">(${money(r.sinStockRetiraValor)})</span></td>
+        <td>${r.sinStockDespacho||0} <span style="color:var(--steel); font-size:11px;">(${money(r.sinStockDespachoValor)})</span></td>
+        <td>${r.otrosMotivosRetira||0} <span style="color:var(--steel); font-size:11px;">(${money(r.otrosMotivosRetiraValor)})</span></td>
+        <td>${r.otrosMotivosDespacho||0} <span style="color:var(--steel); font-size:11px;">(${money(r.otrosMotivosDespachoValor)})</span></td>
+        <td>${r.retiraCliente} <span style="color:var(--steel); font-size:11px;">(${money(r.retiraClienteValor)})</span></td>
+        <td>${r.porDespachar} <span style="color:var(--steel); font-size:11px;">(${money(r.porDespacharValor)})</span></td>
+        <td>${r.retenidas||0} <span style="color:var(--steel); font-size:11px;">(${money(r.retenidasValor)})</span></td>
+        <td>${r.bloqueadas||0} <span style="color:var(--steel); font-size:11px;">(${money(r.bloqueadasValor)})</span></td>
+      </tr>`).join('')}
+      <tr class="totalrow">
+        <td>TOTAL GENERAL</td>
+        <td>${tot('total')} (${money(tot('totalValor'))})</td>
+        <td>${tot('aprobadas')} (${money(tot('aprobadasValor'))})</td>
+        <td>${tot('pendientes')} (${money(tot('pendientesValor'))})</td>
+        <td>${tot('programadas')} (${money(tot('programadasValor'))})</td>
+        <td>${tot('progParcial')} (${money(tot('progParcialValor'))})</td>
+        <td>${tot('noProgRetira')} (${money(tot('noProgRetiraValor'))})</td>
+        <td>${tot('noProgDespacho')} (${money(tot('noProgDespachoValor'))})</td>
+        <td>${tot('sinStockRetira')} (${money(tot('sinStockRetiraValor'))})</td>
+        <td>${tot('sinStockDespacho')} (${money(tot('sinStockDespachoValor'))})</td>
+        <td>${tot('otrosMotivosRetira')} (${money(tot('otrosMotivosRetiraValor'))})</td>
+        <td>${tot('otrosMotivosDespacho')} (${money(tot('otrosMotivosDespachoValor'))})</td>
+        <td>${tot('retiraCliente')} (${money(tot('retiraClienteValor'))})</td>
+        <td>${tot('porDespachar')} (${money(tot('porDespacharValor'))})</td>
+        <td>${tot('retenidas')} (${money(tot('retenidasValor'))})</td><td>${tot('bloqueadas')} (${money(tot('bloqueadasValor'))})</td>
+      </tr>
+    </tbody>`;
+}
+
+function renderDashOperacionTable(){
+  const rows = RESULT.dashboardPorOperacion;
+  const tot = k => rows.reduce((s,r)=>s+r[k],0);
+  document.getElementById('dashOperacionTable').innerHTML = `
+    <thead><tr>
+      <th>Operación (motivo)</th><th>Cantidad NV</th><th>Valor total</th><th>De las cuales No Programadas</th><th>Valor No Programadas</th>
+    </tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${esc(r.operacion)}</td><td>${r.cantidad}</td><td>${money(r.valor)}</td>
+        <td>${r.noProgramadas||'-'}</td><td>${r.noProgramadasValor? money(r.noProgramadasValor):'-'}</td>
+      </tr>`).join('')}
+      <tr class="totalrow">
+        <td>TOTAL GENERAL</td><td>${tot('cantidad')}</td><td>${money(tot('valor'))}</td>
+        <td>${tot('noProgramadas')}</td><td>${money(tot('noProgramadasValor'))}</td>
+      </tr>
+    </tbody>`;
+}
+
+function renderBloqueados(){
+  const panel = document.getElementById('bloqueadosPanel');
+  if(!RESULT.bloqueados.length){ panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  const porCliente = {};
+  RESULT.bloqueados.forEach(b=>{
+    const k = b.codAux+'|'+b.cliente;
+    if(!porCliente[k]) porCliente[k] = {cliente:b.cliente, codAux:b.codAux, nvs:new Set(), vendedor:b.vendedor};
+    porCliente[k].nvs.add(b.nv+' ('+b.nvEstado+')');
+  });
+  const rows = Object.values(porCliente);
+  document.getElementById('bloqueadosTable').innerHTML = `
+    <thead><tr><th>Cliente</th><th>RUT/CodAux</th><th>Vendedor</th><th>NV afectadas</th><th>Estado</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${esc(r.cliente)}</td><td>${esc(r.codAux)}</td><td>${esc(r.vendedor)}</td>
+        <td>${[...r.nvs].join(', ')}</td>
+        <td><span class="badge badge-bloq">BLOQUEADO</span></td>
+      </tr>`).join('')}
+    </tbody>`;
+}
+
+function renderNoProgramadas(){
+  document.querySelectorAll('#noProgSeg button').forEach(b=>{
+    b.classList.toggle('active', b.getAttribute('data-tipo')===currentNoProgTipo);
+    b.onclick = () => { currentNoProgTipo = b.getAttribute('data-tipo'); renderNoProgramadas(); };
+  });
+
+  const all = RESULT.noProgramadasNV;
+  const rows = currentNoProgTipo==='Todos' ? all : all.filter(n=>n.tipo===currentNoProgTipo);
+  const sorted = [...rows].sort((a,b)=> (a.vendedor||'').localeCompare(b.vendedor||'') || (a.nv-b.nv));
+
+  if(!sorted.length){
+    document.getElementById('noProgTable').innerHTML = `<tbody><tr><td class="empty">No hay NV sin programar en esta categoría.</td></tr></tbody>`;
+    return;
+  }
+  document.getElementById('noProgTable').innerHTML = `
+    <thead><tr>
+      <th>NV</th><th>Tipo</th><th>Vendedor</th><th>Cliente</th><th>Motivo (Operación)</th><th>Retenida</th><th>Bloqueada</th>
+    </tr></thead>
+    <tbody>
+      ${sorted.map(n=>`<tr>
+        <td>${esc(n.nv)}<span class="tag tag-${n.nvEstado}">${esc(n.nvEstado)}</span></td>
+        <td><span class="badge ${n.tipo==='Retira Cliente'?'badge-retira':'badge-despacha'}">${esc(n.tipo)}</span></td>
+        <td>${esc(n.vendedor)}</td>
+        <td>${esc(n.cliente)}</td>
+        <td>${esc(n.motivo || 'Sin motivo registrado')}</td>
+        <td>${n.retenida==='Si' ? '<span class="badge badge-bloq">Sí</span>' : '-'}</td>
+        <td>${n.bloqueado==='S' ? '<span class="badge badge-bloq">Sí</span>' : '-'}</td>
+      </tr>`).join('')}
+    </tbody>`;
+}
+
+function renderResumenVendedor(){
+  const rows = RESULT.resumenPorTipo[currentTipo] || [];
+  const totalCub = rows.reduce((s,r)=>s+r.valorCubierto,0);
+  const totalSin = rows.reduce((s,r)=>s+r.valorSinCubrir,0);
+  document.getElementById('resumenVendedorTable').innerHTML = `
+    <thead><tr>
+      <th>Vendedor</th><th>NV total (${esc(currentTipo)})</th><th>Completas</th><th>Parciales</th><th>Sin cobertura</th>
+      <th>Valor cubierto</th><th>Valor sin cubrir</th>
+    </tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${esc(r.vendedor)}</td><td>${r.nvTotal}</td>
+        <td>${r.completo}</td><td>${r.parcial}</td><td>${r.noCubre}</td>
+        <td>${money(r.valorCubierto)}</td><td>${money(r.valorSinCubrir)}</td>
+      </tr>`).join('')}
+      <tr class="totalrow">
+        <td>TOTAL GENERAL</td><td>${rows.reduce((s,r)=>s+r.nvTotal,0)}</td>
+        <td>${rows.reduce((s,r)=>s+r.completo,0)}</td>
+        <td>${rows.reduce((s,r)=>s+r.parcial,0)}</td>
+        <td>${rows.reduce((s,r)=>s+r.noCubre,0)}</td>
+        <td>${money(totalCub)}</td><td>${money(totalSin)}</td>
+      </tr>
+    </tbody>`;
+}
+
+function renderTabs(){
+  const tabsEl = document.getElementById('vendorTabs');
+  const resumen = RESULT.resumenPorTipo[currentTipo] || [];
+  const countsByVendor = {};
+  resumen.forEach(r=>countsByVendor[r.vendedor]=r.nvTotal);
+  tabsEl.innerHTML = RESULT.vendedoresConDatos.map(v => `
+    <div class="tab ${v===currentVendor?'active':''}" data-v="${esc(v)}">
+      ${esc(v)} <span class="count">(${countsByVendor[v]||0})</span>
+    </div>
+  `).join('');
+  tabsEl.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      currentVendor = t.getAttribute('data-v');
+      renderTabs();
+      renderVendorPanel();
+    });
+  });
+
+  document.querySelectorAll('#tipoSeg button').forEach(b=>{
+    b.classList.toggle('active', b.getAttribute('data-tipo')===currentTipo);
+    b.onclick = () => {
+      currentTipo = b.getAttribute('data-tipo');
+      renderResumenVendedor();
+      renderTabs();
+      renderVendorPanel();
+    };
+  });
+}
+
+function renderVendorPanel(){
+  const actionsEl = document.getElementById('vendorActions');
+  const contactos = CONTACTOS[currentVendor] || [];
+  const resumen = (RESULT.resumenPorTipo[currentTipo]||[]).find(r=>r.vendedor===currentVendor)
+                  || {completo:0, parcial:0, noCubre:0, valorCubierto:0, valorSinCubrir:0};
+
+  if(!contactos.length){
+    actionsEl.innerHTML = `<span class="pending-note">Sin contacto cargado para "${esc(currentVendor)}" — agrégalo en el objeto CONTACTOS del archivo.</span>
+      <button class="btn btn-export btn-ghost" id="btnExportVendor">⬇ Exportar esta pestaña</button>`;
+  } else {
+    const to = contactos.map(c=>c.email).join(',');
+    const subject = encodeURIComponent(`${currentTipo} vigentes - ${currentVendor}`);
+    const bodyLines = [
+      `Estimado/a,`, ``,
+      `Se adjunta la revisión de stock disponible en Bodega 2 para las NV vigentes (Aprobadas/Pendientes) tipo ${currentTipo} de ${currentVendor}.`,
+      `Resumen: ${resumen.completo} NV con cobertura completa, ${resumen.parcial} con cobertura parcial, ${resumen.noCubre} sin cobertura.`,
+      `Valor total cubierto: ${money(resumen.valorCubierto)}`, ``,
+      `Por favor revisar el detalle adjunto y gestionar según corresponda.`, ``, `Saludos,`
+    ];
+    const body = encodeURIComponent(bodyLines.join('\n'));
+    const mailto = `mailto:${to}?subject=${subject}&body=${body}`;
+    let html = `<a class="btn btn-mail" href="${mailto}">📧 Enviar correo (${contactos.map(c=>c.email).join(', ')})</a>`;
+    contactos.forEach(c => {
+      const waText = encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}, te comparto la revisión de NV ${currentTipo} vigentes, cualquier duda me avisas.`);
+      html += `<a class="btn btn-wa" target="_blank" href="https://wa.me/${c.cel}?text=${waText}">💬 WhatsApp ${esc(c.nombre)}</a>`;
+    });
+    html += `<button class="btn btn-export btn-ghost" id="btnExportVendor">⬇ Exportar esta pestaña</button>`;
+    actionsEl.innerHTML = html;
+  }
+  const btnExp = document.getElementById('btnExportVendor');
+  if(btnExp) btnExp.addEventListener('click', () => exportVendorExcel(currentVendor, currentTipo));
+
+  renderVendorTable();
+}
+
+function renderVendorTable(){
+  const rows = RESULT.analisis.filter(a => a.vendedor === currentVendor && a.tipo === currentTipo);
+  const q = currentSearch.trim().toLowerCase();
+  const filtered = q ? rows.filter(r =>
+    String(r.codigo).toLowerCase().includes(q) ||
+    String(r.producto||'').toLowerCase().includes(q) ||
+    String(r.cliente||'').toLowerCase().includes(q) ||
+    String(r.nv).includes(q)
+  ) : rows;
+
+  const badgeClass = e => e==='Cubre Completo' ? 'badge-completo' : e==='Cubre Parcial' ? 'badge-parcial' : 'badge-no';
+
+  if(!filtered.length){
+    document.getElementById('vendorTable').innerHTML = `<tbody><tr><td class="empty">Sin resultados para este filtro.</td></tr></tbody>`;
+  } else {
+    document.getElementById('vendorTable').innerHTML = `
+      <thead><tr>
+        <th>Código</th><th>Producto</th><th>NV</th><th>Fecha emisión</th><th>Cliente</th><th>Comuna</th><th>Operación</th>
+        <th>Saldo</th><th>Valor saldo</th><th>Stock disp. código</th>
+        <th>Cant. cubierta</th><th>Valor cubierto</th><th>Saldo sin cubrir</th><th>Valor sin cubrir</th><th>Estado</th>
+      </tr></thead>
+      <tbody>
+        ${filtered.map(r => `<tr>
+          <td>${esc(r.codigo)}</td>
+          <td>${esc(r.producto)}</td>
+          <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span></td>
+          <td>${fmtFecha(r.fecha)}</td>
+          <td>${esc(r.cliente)}</td>
+          <td>${esc(r.comuna||'')}</td>
+          <td>${esc(r.operacion && r.operacion!=='0' ? r.operacion : '')}</td>
+          <td>${num(r.saldo)}</td>
+          <td>${money(r.saldoValor)}</td>
+          <td>${num(r.stockDisponibleCodigo)}</td>
+          <td>${num(r.cantidadCubierta)}</td>
+          <td>${money(r.valorCubierto)}</td>
+          <td>${num(r.saldoSinCubrir)}</td>
+          <td>${money(r.valorSinCubrir)}</td>
+          <td><span class="badge ${badgeClass(r.estado)}">${esc(r.estado)}</span></td>
+        </tr>`).join('')}
+      </tbody>`;
+  }
+  document.getElementById('vendorFootnote').textContent =
+    `${filtered.length} de ${rows.length} NV mostradas (${currentTipo}) · el número junto a cada NV indica su estado: A = Aprobada, P = Pendiente.`;
+}
+
+function renderRetenidas(){
+  const rows = RESULT.retenidas;
+  if(!rows.length){
+    document.getElementById('retenidasTable').innerHTML = `<tbody><tr><td class="empty">No hay NV retenidas por crédito entre las vigentes (A/P).</td></tr></tbody>`;
+    return;
+  }
+  // Agrupar por NV, sumando el valor de saldo de todas sus líneas
+  const porNV = {};
+  rows.forEach(r => {
+    if(!porNV[r.nv]) porNV[r.nv] = {
+      nv:r.nv, nvEstado:r.nvEstado, fecha:r.fecha_dt, vendedor:r.vendedor, cliente:r.cliente,
+      tipo: r.retira==='Si' ? 'Retira Cliente' : 'Por Despachar', valorSaldo:0
+    };
+    porNV[r.nv].valorSaldo += r.saldoValor;
+  });
+  const agrupadas = Object.values(porNV).sort((a,b)=>a.nv-b.nv);
+
+  document.getElementById('retenidasTable').innerHTML = `
+    <thead><tr><th>NV</th><th>Fecha</th><th>Vendedor</th><th>Cliente</th><th>Tipo</th><th>Valor saldo</th></tr></thead>
+    <tbody>
+      ${agrupadas.map(r=>`<tr>
+        <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span></td>
+        <td>${fmtFecha(r.fecha)}</td><td>${esc(r.vendedor)}</td><td>${esc(r.cliente)}</td>
+        <td><span class="badge ${r.tipo==='Retira Cliente'?'badge-retira':'badge-despacha'}">${esc(r.tipo)}</span></td>
+        <td>${money(r.valorSaldo)}</td>
+      </tr>`).join('')}
+    </tbody>`;
+}
+
+/* ============================================================
+   Login / Sesión / Roles
+   ============================================================ */
+function poblarSelectUsuarios(){
+  const sel = document.getElementById('loginUserSelect');
+  sel.innerHTML = USERS.slice().sort((a,b)=>a.username.localeCompare(b.username))
+    .map(u=>`<option value="${esc(u.username)}">${esc(u.username)} (${esc(ROLE_LABELS[u.role]||u.role)})</option>`).join('');
+}
+
+function intentarLogin(){
+  const username = document.getElementById('loginUserSelect').value;
+  const pass = document.getElementById('loginPassInput').value;
+  const user = USERS.find(u=>u.username===username);
+  const errEl = document.getElementById('loginError');
+  if(!user || user.password !== pass){
+    errEl.textContent = 'Usuario o contraseña incorrectos.';
+    return;
+  }
+  errEl.textContent = '';
+  sesion = {username:user.username, role:user.role, vendedores:user.vendedores||[]};
+  document.getElementById('loginPassInput').value = '';
+  aplicarSesion();
+}
+
+function logout(){
+  sesion = null;
+  tabActivo = null;
+  document.getElementById('loginWrap').classList.remove('hidden');
+  document.getElementById('mainWrap').classList.add('hidden');
+  document.getElementById('sesionBar').classList.add('hidden');
+  poblarSelectUsuarios();
+}
+
+function aplicarSesion(){
+  document.getElementById('loginWrap').classList.add('hidden');
+  document.getElementById('mainWrap').classList.remove('hidden');
+  document.getElementById('sesionBar').classList.remove('hidden');
+  document.getElementById('sesionLabel').textContent = `${sesion.username} · ${ROLE_LABELS[sesion.role]||sesion.role}`;
+
+  if(!RESULT){
+    const guardado = cargarDatosGuardados();
+    if(guardado && guardado.rows && guardado.rows.length){
+      RESULT = procesarDatos(guardado.rows);
+      document.getElementById('filename').textContent = guardado.filename || '';
+      mostrarInfoDatosGuardados(guardado.filename || '(archivo guardado)', guardado.savedAt);
+    }
+  }
+
+  renderTabsNav();
+  if(sesion.role === 'admin') renderUsersTable();
+  if(RESULT) render(); else renderProgramaDespacho();
+}
+
+let tabActivo = null;
+function tabsDisponibles(){
+  const esAdmin = sesion.role === 'admin';
+  const esGerencia = sesion.role === 'gerencia_general' || sesion.role === 'gerencia_comercial';
+  const tabs = [];
+  if(esAdmin || esGerencia) tabs.push({id:'tabAnalisis', label:'📊 Análisis'});
+  tabs.push({id:'tabDespacho', label:'📅 Programa de Despacho'});
+  if(esAdmin) tabs.push({id:'tabMaestro', label:'🔧 Maestro'});
+  return tabs;
+}
+
+function renderTabsNav(){
+  const tabs = tabsDisponibles();
+  if(!tabActivo || !tabs.some(t=>t.id===tabActivo)) tabActivo = tabs[0].id;
+  document.getElementById('mainTabs').innerHTML = tabs.map(t => `
+    <div class="tab ${t.id===tabActivo?'active':''}" data-tab="${t.id}">${t.label}</div>
+  `).join('');
+  document.querySelectorAll('#mainTabs .tab').forEach(el => el.addEventListener('click', () => {
+    tabActivo = el.getAttribute('data-tab');
+    aplicarTabActivo();
+  }));
+  aplicarTabActivo();
+}
+
+function aplicarTabActivo(){
+  ['tabAnalisis','tabDespacho','tabMaestro'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('hidden', id !== tabActivo);
+  });
+  document.querySelectorAll('#mainTabs .tab').forEach(el => {
+    el.classList.toggle('active', el.getAttribute('data-tab')===tabActivo);
+  });
+  const appEl = document.getElementById('app');
+  if(appEl) appEl.classList.toggle('hidden', tabActivo !== 'tabAnalisis');
+}
+
+/* ============================================================
+   Gestión de Usuarios (solo admin)
+   ============================================================ */
+function renderUsersTable(){
+  document.getElementById('usersTable').innerHTML = `
+    <thead><tr><th>Usuario</th><th>Rol</th><th>Vendedor vinculado</th><th>Contraseña</th><th></th></tr></thead>
+    <tbody>
+      ${USERS.map((u,i)=>`<tr>
+        <td>${esc(u.username)}</td>
+        <td>
+          <select data-i="${i}" class="userRoleSelect" style="padding:4px 6px; border:1px solid var(--line); border-radius:4px; font-size:12.5px;">
+            ${ROLES.map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${esc(ROLE_LABELS[r])}</option>`).join('')}
+          </select>
+        </td>
+        <td>
+          <select data-i="${i}" class="userVendedorSelect" multiple size="3" style="padding:4px 6px; border:1px solid var(--line); border-radius:4px; font-size:12px; min-width:180px;" ${u.role!=='vendedor'?'disabled':''}>
+            ${Object.keys(CONTACTOS).sort().map(v=>`<option value="${esc(v)}" ${(u.vendedores||[]).includes(v)?'selected':''}>${esc(v)}</option>`).join('')}
+          </select>
+        </td>
+        <td>
+          <div style="position:relative; display:inline-block;">
+            <input data-i="${i}" class="userPassInput" type="password" value="${esc(u.password)}" style="padding:4px 26px 4px 6px; border:1px solid var(--line); border-radius:4px; font-size:12.5px; width:100px;">
+            <button type="button" data-i="${i}" class="btnTogglePass" style="position:absolute; right:2px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:13px; padding:1px 3px;" title="Mostrar/ocultar">👁️</button>
+          </div>
+        </td>
+        <td>${u.username==='admin' ? '' : `<button data-i="${i}" class="btn btn-ghost btnDelUser" style="padding:4px 10px;">Eliminar</button>`}</td>
+      </tr>`).join('')}
+    </tbody>`;
+
+  document.querySelectorAll('.userRoleSelect').forEach(sel => sel.addEventListener('change', e => {
+    const i = +e.target.getAttribute('data-i');
+    USERS[i].role = e.target.value;
+    if(e.target.value !== 'vendedor') USERS[i].vendedores = [];
+    guardarUsuarios(USERS);
+    renderUsersTable();
+  }));
+  document.querySelectorAll('.userVendedorSelect').forEach(sel => sel.addEventListener('change', e => {
+    const i = +e.target.getAttribute('data-i');
+    USERS[i].vendedores = Array.from(e.target.selectedOptions).map(o=>o.value);
+    guardarUsuarios(USERS);
+  }));
+  document.querySelectorAll('.userPassInput').forEach(inp => inp.addEventListener('change', e => {
+    const i = +e.target.getAttribute('data-i');
+    USERS[i].password = e.target.value.trim() || '0000';
+    guardarUsuarios(USERS);
+  }));
+  document.querySelectorAll('.btnTogglePass').forEach(btn => btn.addEventListener('click', e => {
+    const i = e.target.getAttribute('data-i');
+    const inp = document.querySelector(`.userPassInput[data-i="${i}"]`);
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }));
+  document.querySelectorAll('.btnDelUser').forEach(btn => btn.addEventListener('click', e => {
+    const i = +e.target.getAttribute('data-i');
+    if(confirm(`¿Eliminar al usuario "${USERS[i].username}"?`)){
+      USERS.splice(i,1);
+      guardarUsuarios(USERS);
+      renderUsersTable();
+    }
+  }));
+}
+
+function regenerarUsuariosVendedores(){
+  if(!confirm('Esto va a recrear los usuarios automáticos de cada vendedor (según CONTACTOS) y actualizar sus vendedores vinculados. Los usuarios que creaste manualmente y sus contraseñas personalizadas para vendedores existentes también se conservan por username. ¿Continuar?')) return;
+  const nuevos = seedUsuarios().filter(u=>u.username!=='admin');
+  nuevos.forEach(nuevo => {
+    const existente = USERS.find(u=>u.username===nuevo.username);
+    if(existente){
+      existente.vendedores = nuevo.vendedores; // refresca vínculo por si cambiaron correos en CONTACTOS
+      existente.role = existente.role || 'vendedor';
+    } else {
+      USERS.push(nuevo);
+    }
+  });
+  guardarUsuarios(USERS);
+  renderUsersTable();
+  alert('Usuarios vendedores regenerados/actualizados.');
+}
+
+function nuevoUsuario(){
+  const username = prompt('Nombre de usuario (sin espacios):');
+  if(!username) return;
+  if(USERS.some(u=>u.username===username.trim())){ alert('Ese usuario ya existe.'); return; }
+  const password = prompt('Contraseña inicial:', '1234') || '1234';
+  USERS.push({username:username.trim(), password:password.trim(), role:'vendedor', vendedores:[]});
+  guardarUsuarios(USERS);
+  renderUsersTable();
+}
+
+function exportarUsuarios(){
+  const blob = new Blob([JSON.stringify(USERS,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `usuarios_nv_programadas_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+}
+
+function importarUsuarios(file){
+  const reader = new FileReader();
+  reader.onload = e => {
+    try{
+      const parsed = JSON.parse(e.target.result);
+      if(!Array.isArray(parsed)) throw new Error('Formato inválido');
+      USERS = parsed;
+      guardarUsuarios(USERS);
+      renderUsersTable();
+      poblarSelectUsuarios();
+      alert('Usuarios importados correctamente.');
+    }catch(err){
+      alert('No se pudo leer el archivo de usuarios: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ============================================================
+   Programa de Despacho
+   ============================================================ */
+function renderProgramaDespacho(){
+  if(!sesion || !RESULT) return;
+  document.getElementById('progDespachoPanel').classList.remove('hidden');
+
+  const esVendedor = sesion.role === 'vendedor';
+  document.getElementById('pdSesionLabel').textContent = esVendedor ? ((sesion.vendedores&&sesion.vendedores.length) ? sesion.vendedores.join(', ') : '(sin vendedor vinculado)') : 'Vista completa';
+
+  const filtroWrap = document.getElementById('pdVendorFilterWrap');
+  const selFiltro = document.getElementById('pdVendedorFiltro');
+  if(esVendedor){
+    selFiltro.classList.add('hidden');
+  } else {
+    selFiltro.classList.remove('hidden');
+    if(!selFiltro.dataset.filled){
+      selFiltro.innerHTML = `<option value="__TODOS__">Todos los vendedores</option>` +
+        RESULT.vendedoresConDatos.concat(Object.keys(CONTACTOS)).filter((v,i,a)=>a.indexOf(v)===i).sort()
+          .map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+      selFiltro.dataset.filled = '1';
+      selFiltro.value = pdVendedorFiltro;
+      selFiltro.addEventListener('change', e => { pdVendedorFiltro = e.target.value; renderProgramaDespachoTabla(); });
+    }
+  }
+  renderProgramaDespachoTabla();
+}
+
+function inicioSemanaActual(){
+  const hoy = new Date();
+  hoy.setHours(0,0,0,0);
+  const dia = hoy.getDay(); // 0=domingo, 1=lunes...
+  const offset = dia === 0 ? -6 : 1 - dia; // retrocede hasta el lunes
+  const lunes = new Date(hoy);
+  lunes.setDate(hoy.getDate() + offset);
+  const domingo = new Date(lunes);
+  domingo.setDate(lunes.getDate() + 6);
+  domingo.setHours(23,59,59,999);
+  return {lunes, domingo};
+}
+function esSemanaActual(fecha){
+  if(!fecha) return false;
+  const {lunes, domingo} = inicioSemanaActual();
+  return fecha.getTime() >= lunes.getTime() && fecha.getTime() <= domingo.getTime();
+}
+function fprogCellHtml(fecha){
+  if(!fecha) return '<span class="pending-note" style="padding:2px 8px;">Sin programar</span>';
+  if(esSemanaActual(fecha)){
+    return `<span class="badge badge-completo">${fmtFecha(fecha)}</span>`;
+  }
+  return `<span class="badge" style="background:#fde9d9; color:#c1620a;">${fmtFecha(fecha)}</span>`;
+}
+
+function renderProgramaDespachoTabla(){
+  const esVendedor = sesion.role === 'vendedor';
+  let base;
+  if(esVendedor){
+    base = RESULT.programaDespacho.filter(r => (sesion.vendedores||[]).includes(r.vendedor));
+  } else if(pdVendedorFiltro === '__TODOS__'){
+    base = RESULT.programaDespacho;
+  } else {
+    base = RESULT.programaDespacho.filter(r => r.vendedor === pdVendedorFiltro);
+  }
+  const q = pdSearch.trim().toLowerCase();
+  let rows = q ? base.filter(r =>
+    String(r.nv).includes(q) ||
+    String(r.oc||'').toLowerCase().includes(q) ||
+    String(r.codigo).toLowerCase().includes(q) ||
+    String(r.producto||'').toLowerCase().includes(q) ||
+    String(r.cliente||'').toLowerCase().includes(q) ||
+    String(r.vendedor||'').toLowerCase().includes(q)
+  ) : base;
+  if(pdEstadoFiltro !== 'Todos') rows = rows.filter(r => r.nvEstado === pdEstadoFiltro);
+  if(pdProgFiltro === 'Si') rows = rows.filter(r => r.fprogFecha);
+  else if(pdProgFiltro === 'No') rows = rows.filter(r => !r.fprogFecha);
+
+  if(!rows.length){
+    document.getElementById('pdTable').innerHTML = `<tbody><tr><td class="empty">No hay NV Por Despachar para esta vista.</td></tr></tbody>`;
+  } else {
+    document.getElementById('pdTable').innerHTML = `
+      <thead><tr>
+        <th>NV</th><th>OC</th><th>Fecha Emisión</th><th>Cliente</th><th>Código</th><th>Descripción</th><th>UM</th><th>Vendedor</th>
+        <th>Cantidad Programada (QPROG)</th><th>Fecha Programada (FPROG)</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r=>`<tr>
+          <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span></td>
+          <td>${esc(r.oc||'')}</td>
+          <td>${fmtFecha(r.fechaEmis)}</td>
+          <td>${esc(r.cliente||'')}</td>
+          <td>${esc(r.codigo)}</td>
+          <td>${esc(r.producto)}</td>
+          <td>${esc(r.um||'')}</td>
+          <td>${esc(r.vendedor)}</td>
+          <td>${num(r.qprog)}</td>
+          <td>${fprogCellHtml(r.fprogFecha)}</td>
+        </tr>`).join('')}
+      </tbody>`;
+  }
+  document.getElementById('pdFootnote').textContent = `${rows.length} de ${base.length} líneas mostradas. Verde = programada para esta semana (lun-dom) · Naranjo = programada para otra semana · Rojo = sin programar.`;
+}
+
+function pdExportExcel(){
+  if(!sesion || !RESULT) return;
+  const esVendedor = sesion.role === 'vendedor';
+  let base;
+  if(esVendedor) base = RESULT.programaDespacho.filter(r => (sesion.vendedores||[]).includes(r.vendedor));
+  else if(pdVendedorFiltro === '__TODOS__') base = RESULT.programaDespacho;
+  else base = RESULT.programaDespacho.filter(r => r.vendedor === pdVendedorFiltro);
+  if(pdEstadoFiltro !== 'Todos') base = base.filter(r => r.nvEstado === pdEstadoFiltro);
+  if(pdProgFiltro === 'Si') base = base.filter(r => r.fprogFecha);
+  else if(pdProgFiltro === 'No') base = base.filter(r => !r.fprogFecha);
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(base.map(r => ({
+    'NV': r.nv, 'Estado NV': r.nvEstado, 'OC': r.oc||'', 'Fecha Emision': fmtFecha(r.fechaEmis),
+    'Codigo': r.codigo, 'Descripcion': r.producto, 'UM': r.um||'', 'Cliente': r.cliente||'',
+    'Vendedor': r.vendedor, 'Cantidad Programada (QPROG)': r.qprog,
+    'Fecha Programada (FPROG)': r.fprogFecha ? fmtFecha(r.fprogFecha) : 'Sin programar'
+  })));
+  XLSX.utils.book_append_sheet(wb, ws, 'Programa Despacho');
+  const nombre = esVendedor ? (sesion.vendedores.join('_')||sesion.username).replace(/[^a-zA-Z0-9_]/g,'_') : (pdVendedorFiltro==='__TODOS__'?'TODOS':pdVendedorFiltro.replace(/[^a-zA-Z0-9]/g,'_'));
+  XLSX.writeFile(wb, `Programa_Despacho_${nombre}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+poblarSelectUsuarios();
+document.getElementById('loginBtn').addEventListener('click', intentarLogin);
+document.getElementById('loginPassInput').addEventListener('keydown', e => { if(e.key==='Enter') intentarLogin(); });
+document.getElementById('loginPassToggle').addEventListener('click', () => {
+  const inp = document.getElementById('loginPassInput');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+});
+document.getElementById('btnLogout').addEventListener('click', logout);
+document.getElementById('btnNuevoUsuario').addEventListener('click', nuevoUsuario);
+document.getElementById('btnRegenerarVendedores').addEventListener('click', regenerarUsuariosVendedores);
+document.getElementById('btnExportUsers').addEventListener('click', exportarUsuarios);
+document.getElementById('btnImportUsers').addEventListener('click', () => document.getElementById('importUsersInput').click());
+document.getElementById('importUsersInput').addEventListener('change', e => { if(e.target.files[0]) importarUsuarios(e.target.files[0]); });
+document.getElementById('importDatosInput').addEventListener('change', e => { if(e.target.files[0]) importarDatosCargados(e.target.files[0]); });
+document.getElementById('pdExportBtn').addEventListener('click', pdExportExcel);
+document.getElementById('pdSearchBox').addEventListener('input', e => { pdSearch = e.target.value; renderProgramaDespachoTabla(); });
+document.getElementById('pdEstadoFiltro').addEventListener('change', e => { pdEstadoFiltro = e.target.value; renderProgramaDespachoTabla(); });
+document.getElementById('pdProgFiltro').addEventListener('change', e => { pdProgFiltro = e.target.value; renderProgramaDespachoTabla(); });
+
+/* ============================================================
+   Exportación a Excel
+   ============================================================ */
+function analisisToSheetRows(rows){
+  return rows.map(r => ({
+    'Código': r.codigo, 'Producto': r.producto, 'NV': r.nv, 'Estado NV': r.nvEstado, 'Tipo': r.tipo,
+    'Fecha emisión': fmtFecha(r.fecha), 'Vendedor': r.vendedor, 'Cliente': r.cliente, 'Comuna': r.comuna,
+    'Operación': (r.operacion && r.operacion!=='0') ? r.operacion : '',
+    'Saldo': r.saldo, 'Valor Saldo': r.saldoValor, 'Stock Disponible Código': r.stockDisponibleCodigo,
+    'Cantidad Cubierta': r.cantidadCubierta, 'Valor Cubierto': r.valorCubierto,
+    'Saldo Sin Cubrir': r.saldoSinCubrir, 'Valor Sin Cubrir': r.valorSinCubrir, 'Estado': r.estado
+  }));
+}
+
+function exportVendorExcel(vendedor, tipo){
+  const rows = RESULT.analisis.filter(a=>a.vendedor===vendedor && a.tipo===tipo);
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(analisisToSheetRows(rows));
+  XLSX.utils.book_append_sheet(wb, ws, (vendedor+'-'+tipo).substring(0,31));
+  XLSX.writeFile(wb, `NV_${tipo.replace(/ /g,'_')}_${vendedor.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function exportAllExcel(){
+  const wb = XLSX.utils.book_new();
+
+  const wsOperacion = XLSX.utils.json_to_sheet(RESULT.dashboardPorOperacion.map(r=>({
+    'Operación (motivo)': r.operacion, 'Cantidad NV': r.cantidad, 'Valor Total': r.valor,
+    'No Programadas': r.noProgramadas, 'Valor No Programadas': r.noProgramadasValor
+  })));
+  XLSX.utils.book_append_sheet(wb, wsOperacion, 'Dashboard x Operacion');
+
+  const wsNoProg = XLSX.utils.json_to_sheet(RESULT.noProgramadasNV.map(n=>({
+    'NV': n.nv, 'Estado NV': n.nvEstado, 'Tipo': n.tipo, 'Vendedor': n.vendedor, 'Cliente': n.cliente,
+    'Motivo (Operación)': n.motivo || 'Sin motivo registrado',
+    'Retenida': n.retenida==='Si'?'Sí':'', 'Bloqueada': n.bloqueado==='S'?'Sí':''
+  })));
+  XLSX.utils.book_append_sheet(wb, wsNoProg, 'NV No Programadas');
+
+  const d = RESULT.dashboard;
+  const wsGeneral = XLSX.utils.json_to_sheet([{
+    'NV Totales': d.totalNV, 'Valor Total': d.totalValor,
+    'Aprobadas': d.aprobadas, 'Valor Aprobadas': d.aprobadasValor,
+    'Pendientes': d.pendientes, 'Valor Pendientes': d.pendientesValor,
+    'Programadas': d.programadas, 'Valor Programadas': d.programadasValor,
+    'Prog. Parcial': d.progParcial, 'Valor Prog. Parcial': d.progParcialValor,
+    'No Programadas': d.noProgramadas, 'Valor No Programadas': d.noProgramadasValor,
+    'No Prog. Retira Cliente': d.noProgRetira, 'Valor No Prog. Retira': d.noProgRetiraValor,
+    'No Prog. Por Despachar': d.noProgDespacho, 'Valor No Prog. Despacho': d.noProgDespachoValor,
+    'Retira Cliente': d.retiraCliente, 'Valor Retira Cliente': d.retiraClienteValor,
+    'Por Despachar': d.porDespachar, 'Valor Por Despachar': d.porDespacharValor,
+    'Retenidas': d.retenidas, 'Valor Retenidas': d.retenidasValor,
+    'Retenidas Retira Cliente': d.retenidasRetira, 'Valor Retenidas Retira': d.retenidasRetiraValor,
+    'Retenidas Por Despachar': d.retenidasDespacho, 'Valor Retenidas Despacho': d.retenidasDespachoValor,
+    'Bloqueadas': d.bloqueadas, 'Valor Bloqueadas': d.bloqueadasValor,
+    'NV Sin Programar x Falta Stock': d.sinStockTotal, 'Valor Sin Programar x Falta Stock': d.sinStockTotalValor,
+    'Sin Stock Retira Cliente': d.sinStockRetira, 'Valor Sin Stock Retira': d.sinStockRetiraValor,
+    'Sin Stock Por Despachar': d.sinStockDespacho, 'Valor Sin Stock Despacho': d.sinStockDespachoValor,
+    'NV Sin Programar x Otros Motivos': d.otrosMotivosTotal, 'Valor Sin Programar x Otros Motivos': d.otrosMotivosTotalValor,
+    'Otros Motivos Retira Cliente': d.otrosMotivosRetira, 'Valor Otros Motivos Retira': d.otrosMotivosRetiraValor,
+    'Otros Motivos Por Despachar': d.otrosMotivosDespacho, 'Valor Otros Motivos Despacho': d.otrosMotivosDespachoValor
+  }]);
+  XLSX.utils.book_append_sheet(wb, wsGeneral, 'Dashboard General');
+
+  const wsDash = XLSX.utils.json_to_sheet(RESULT.dashboardPorVendedor.map(r=>({
+    'Vendedor': r.vendedor, 'Total NV': r.total, 'Aprobadas': r.aprobadas, 'Pendientes': r.pendientes,
+    'Programadas': r.programadas, 'Prog. Parcial': r.progParcial,
+    'No Prog. Retira': r.noProgRetira, 'No Prog. Despacho': r.noProgDespacho,
+    'Sin Stock Retira': r.sinStockRetira, 'Sin Stock Despacho': r.sinStockDespacho,
+    'Otros Motivos Retira': r.otrosMotivosRetira, 'Otros Motivos Despacho': r.otrosMotivosDespacho,
+    'Retira Cliente': r.retiraCliente, 'Por Despachar': r.porDespachar,
+    'Retenidas': r.retenidas, 'Bloqueadas': r.bloqueadas
+  })));
+  XLSX.utils.book_append_sheet(wb, wsDash, 'Dashboard x Vendedor');
+
+  ['Retira Cliente','Por Despachar'].forEach(tipo => {
+    const wsResumen = XLSX.utils.json_to_sheet((RESULT.resumenPorTipo[tipo]||[]).map(r=>({
+      'Vendedor': r.vendedor, 'NV Total': r.nvTotal, 'Completas': r.completo, 'Parciales': r.parcial,
+      'Sin Cobertura': r.noCubre, 'Valor Cubierto': r.valorCubierto, 'Valor Sin Cubrir': r.valorSinCubrir
+    })));
+    XLSX.utils.book_append_sheet(wb, wsResumen, ('Resumen '+tipo).substring(0,31));
+  });
+
+  const wsAnalisis = XLSX.utils.json_to_sheet(analisisToSheetRows(RESULT.analisis));
+  XLSX.utils.book_append_sheet(wb, wsAnalisis, 'Analisis Completo');
+
+  const wsStock = XLSX.utils.json_to_sheet(RESULT.stock.map(s=>({
+    'Código': s.codigo, 'Producto': s.producto, 'Stock Bodega 2': s.stock2,
+    'Suma QPROG': s.sumaQprog, 'Stock Disponible': s.stockDisponible
+  })));
+  XLSX.utils.book_append_sheet(wb, wsStock, 'Stock x Codigo');
+
+  const retenidasPorNV = {};
+  RESULT.retenidas.forEach(r => {
+    if(!retenidasPorNV[r.nv]) retenidasPorNV[r.nv] = {
+      nv:r.nv, nvEstado:r.nvEstado, fecha:r.fecha_dt, vendedor:r.vendedor, cliente:r.cliente,
+      tipo: r.retira==='Si' ? 'Retira Cliente' : 'Por Despachar', valorSaldo:0
+    };
+    retenidasPorNV[r.nv].valorSaldo += r.saldoValor;
+  });
+  const wsRetenidas = XLSX.utils.json_to_sheet(Object.values(retenidasPorNV).sort((a,b)=>a.nv-b.nv).map(r=>({
+    'NV': r.nv, 'Estado NV': r.nvEstado, 'Fecha': fmtFecha(r.fecha),
+    'Vendedor': r.vendedor, 'Cliente': r.cliente, 'Tipo': r.tipo, 'Valor Saldo': r.valorSaldo
+  })));
+  XLSX.utils.book_append_sheet(wb, wsRetenidas, 'NV Retenidas');
+
+  const wsBloq = XLSX.utils.json_to_sheet(RESULT.bloqueados.map(b=>({
+    'Código': b.codigo, 'Producto': b.producto, 'NV': b.nv, 'Estado NV': b.nvEstado,
+    'Fecha': fmtFecha(b.fecha_dt), 'Vendedor': b.vendedor, 'Cliente': b.cliente, 'RUT/CodAux': b.codAux
+  })));
+  XLSX.utils.book_append_sheet(wb, wsBloq, 'Clientes Bloqueados');
+
+  RESULT.vendedoresConDatos.forEach(v => {
+    const rows = RESULT.analisis.filter(a=>a.vendedor===v);
+    const ws = XLSX.utils.json_to_sheet(analisisToSheetRows(rows));
+    XLSX.utils.book_append_sheet(wb, ws, v.substring(0,31));
+  });
+
+  XLSX.writeFile(wb, `APP_Analisis_NV_Programadas_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+/* ============================================================
+   Carga de archivo
+   ============================================================ */
+/* ============================================================
+   Persistencia de datos cargados (localStorage) — quedan fijos
+   hasta que se cargue un archivo nuevo que los reemplace
+   ============================================================ */
+const DATOS_KEY = 'nvprog_datos_v1';
+
+function guardarDatosCargados(rows, filename){
+  try{
+    // Solo se guardan las filas vigentes (A/P) para no exceder el límite de localStorage
+    const relevantes = rows.filter(r => r && (r['nvEstado']==='A' || r['nvEstado']==='P'));
+    localStorage.setItem(DATOS_KEY, JSON.stringify({
+      rows: relevantes, filename, savedAt: new Date().toISOString()
+    }));
+    return true;
+  }catch(e){
+    console.warn('No se pudo guardar el archivo cargado en localStorage:', e);
+    return false;
+  }
+}
+
+function cargarDatosGuardados(){
+  try{
+    const raw = localStorage.getItem(DATOS_KEY);
+    if(!raw) return null;
+    return JSON.parse(raw);
+  }catch(e){ return null; }
+}
+
+function borrarDatosGuardados(){
+  if(!confirm('¿Borrar los datos cargados guardados en este navegador? Tendrás que volver a subir el Excel.')) return;
+  localStorage.removeItem(DATOS_KEY);
+  RESULT = null;
+  document.getElementById('filename').textContent = '';
+  document.getElementById('datosGuardadosInfo').classList.add('hidden');
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('progDespachoPanel').classList.add('hidden');
+}
+
+function mostrarInfoDatosGuardados(filename, savedAt){
+  const el = document.getElementById('datosGuardadosInfo');
+  const fecha = new Date(savedAt);
+  el.innerHTML = `📌 Datos cargados: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')}) — se mantienen hasta que cargues un archivo nuevo.` +
+    (sesion && sesion.role==='admin' ?
+      ` <button class="btn btn-ghost" id="btnExportarDatos" style="padding:3px 10px; margin-left:8px;">⬇ Exportar datos (respaldo)</button>` +
+      ` <button class="btn btn-ghost" id="btnImportarDatos" style="padding:3px 10px; margin-left:4px;">⬆ Importar datos</button>` +
+      ` <button class="btn btn-ghost" id="btnBorrarDatos" style="padding:3px 10px; margin-left:4px;">Borrar</button>`
+      : '');
+  el.classList.remove('hidden');
+  const btnBorrar = document.getElementById('btnBorrarDatos');
+  if(btnBorrar) btnBorrar.addEventListener('click', borrarDatosGuardados);
+  const btnExport = document.getElementById('btnExportarDatos');
+  if(btnExport) btnExport.addEventListener('click', exportarDatosCargados);
+  const btnImport = document.getElementById('btnImportarDatos');
+  if(btnImport) btnImport.addEventListener('click', () => document.getElementById('importDatosInput').click());
+}
+
+function exportarDatosCargados(){
+  const guardado = cargarDatosGuardados();
+  if(!guardado){ alert('No hay datos cargados para exportar.'); return; }
+  const blob = new Blob([JSON.stringify(guardado)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `respaldo_datos_nv_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+}
+
+function importarDatosCargados(file){
+  const reader = new FileReader();
+  reader.onload = e => {
+    try{
+      const parsed = JSON.parse(e.target.result);
+      if(!parsed.rows || !Array.isArray(parsed.rows)) throw new Error('Formato inválido');
+      localStorage.setItem(DATOS_KEY, JSON.stringify(parsed));
+      RESULT = procesarDatos(parsed.rows);
+      document.getElementById('filename').textContent = parsed.filename || '';
+      mostrarInfoDatosGuardados(parsed.filename || '(archivo importado)', parsed.savedAt || new Date().toISOString());
+      render();
+      alert('Datos importados correctamente.');
+    }catch(err){
+      alert('No se pudo leer el archivo de respaldo: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function handleFile(file){
+  document.getElementById('filename').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const data = new Uint8Array(e.target.result);
+    const wb = XLSX.read(data, {type:'array', cellDates:false});
+    const sheetName = wb.SheetNames.includes('Hoja1') ? 'Hoja1' : wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, {defval:null});
+    RESULT = procesarDatos(rows);
+    guardarDatosCargados(rows, file.name);
+    mostrarInfoDatosGuardados(file.name, new Date().toISOString());
+    currentVendor = null;
+    currentTipo = 'Retira Cliente';
+    render();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+const uploadbox = document.getElementById('uploadbox');
+document.getElementById('btnPick').addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', e => { if(e.target.files[0]) handleFile(e.target.files[0]); });
+['dragenter','dragover'].forEach(ev => uploadbox.addEventListener(ev, e => { e.preventDefault(); uploadbox.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => uploadbox.addEventListener(ev, e => { e.preventDefault(); uploadbox.classList.remove('drag'); }));
+uploadbox.addEventListener('drop', e => { if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+
+document.getElementById('btnExportAll').addEventListener('click', exportAllExcel);
+document.getElementById('searchBox').addEventListener('input', e => { currentSearch = e.target.value; renderVendorTable(); });
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW no registrado:', err));
+  });
+}
+</script>
+</body>
+</html>
