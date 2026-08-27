@@ -3,7 +3,7 @@
 // instalada aunque no haya internet. Los datos del Excel viven en localStorage,
 // no aquí, así que no hay riesgo de mostrar información desactualizada del negocio.
 
-const CACHE_NAME = 'nv-programadas-v1';
+const CACHE_NAME = 'nv-programadas-v2';
 const APP_SHELL = [
   './',
   './index.html',
@@ -34,16 +34,14 @@ self.addEventListener('fetch', (event) => {
   // La librería SheetJS (CDN) y cualquier otro request externo: red primero, sin interceptar.
   if (url.origin !== self.location.origin) return;
 
-  // App shell propio: cache primero, con actualización en segundo plano (stale-while-revalidate).
+  // App shell propio: RED primero (para que las actualizaciones se vean de inmediato),
+  // y solo si no hay internet, recién ahí usa la copia guardada en caché.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request)
-        .then((networkResponse) => {
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse.clone()));
-          return networkResponse;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse.clone()));
+        return networkResponse;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
