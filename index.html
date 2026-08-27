@@ -247,6 +247,14 @@
   <div id="datosGuardadosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px; margin-bottom:16px; color:var(--navy-deep);"></div>
   <input type="file" id="importDatosInput" accept=".json" class="hidden">
 
+  <div id="nvDiffPanel" class="panel warn-panel hidden">
+    <div class="panel-head">
+      <h2>⚠️ Diferencias respecto a la versión anterior de NV</h2>
+      <button class="btn btn-ghost" id="btnCerrarNvDiff" style="padding:5px 12px;">Cerrar</button>
+    </div>
+    <div class="panel-body pad" id="nvDiffBody"></div>
+  </div>
+
   <div id="tabMaestro" class="hidden">
     <div id="adminPanel" class="panel">
       <div class="panel-head">
@@ -534,16 +542,25 @@ function actualizarEstadoSync(estado, detalle){
   el.className = 'sync-badge sync-' + estado;
 }
 
+let NV_ROWS_ACTUAL_RAW = null;
+let RESULT_ANTERIOR = null;
+let NV_DIFF = null;
+
 function guardarDatosEnNube(rows, filename){
   if(!firebaseListo){ actualizarEstadoSync('local', 'Firebase no configurado — datos solo en este navegador'); return Promise.resolve(false); }
   const trimmed = trimirFilas(rows);
   actualizarEstadoSync('cargando', 'Subiendo a la nube...');
-  return firebaseDb.collection('nv_programadas').doc('actual').set({
-    rows: trimmed,
-    filename,
-    savedAt: new Date().toISOString(),
-    subidoPor: sesion ? sesion.username : 'desconocido',
-    claveAdmin: FIREBASE_ADMIN_KEY
+  const docRef = firebaseDb.collection('nv_programadas').doc('actual');
+  return docRef.get().then(snap => {
+    const previo = snap.exists ? snap.data() : null;
+    return docRef.set({
+      rowsActual: trimmed, filenameActual: filename, savedAtActual: new Date().toISOString(),
+      rowsAnterior: previo ? (previo.rowsActual || previo.rows || null) : null,
+      filenameAnterior: previo ? (previo.filenameActual || previo.filename || null) : null,
+      savedAtAnterior: previo ? (previo.savedAtActual || previo.savedAt || null) : null,
+      subidoPor: sesion ? sesion.username : 'desconocido',
+      claveAdmin: FIREBASE_ADMIN_KEY
+    });
   }).then(() => {
     actualizarEstadoSync('ok', 'Sincronizado con la nube');
     return true;
@@ -554,6 +571,42 @@ function guardarDatosEnNube(rows, filename){
   });
 }
 
+/* -------- Diferencias entre versión anterior y actual de NV, por NV+Código -------- */
+const NV_CAMPOS_COMPARABLES = [
+  {campo:'nvEstado', label:'Estado NV'},
+  {campo:'programada', label:'Programada', esBool:true},
+  {campo:'Saldo', label:'Saldo'},
+  {campo:'QPROG', label:'QPROG'},
+  {campo:'Bloqueado', label:'Bloqueado'},
+  {campo:'Retenida_Credito', label:'Retenida'}
+];
+function calcularDiffNV(rowsAnterior, rowsActual){
+  const norm = r => ({
+    key: r['Numero_NVenta']+'|'+r['CodProd'],
+    nv: r['Numero_NVenta'], codigo: r['CodProd'], producto: r['DesProd'], vendedor: r['VenDes'],
+    nvEstado: r['nvEstado'], programada: excelSerialToDate(r['FPROG']) !== null,
+    Saldo: r['Saldo'], QPROG: r['QPROG'], Bloqueado: r['Bloqueado'], Retenida_Credito: r['Retenida_Credito']
+  });
+  const mapAnterior = {}; rowsAnterior.forEach(r => { const n=norm(r); mapAnterior[n.key]=n; });
+  const mapActual = {}; rowsActual.forEach(r => { const n=norm(r); mapActual[n.key]=n; });
+
+  const nuevas = [], eliminadas = [], modificadas = [];
+  Object.keys(mapActual).forEach(k => { if(!(k in mapAnterior)) nuevas.push(mapActual[k]); });
+  Object.keys(mapAnterior).forEach(k => { if(!(k in mapActual)) eliminadas.push(mapAnterior[k]); });
+  Object.keys(mapActual).forEach(k => {
+    if(!(k in mapAnterior)) return;
+    const a = mapAnterior[k], b = mapActual[k];
+    const cambios = [];
+    NV_CAMPOS_COMPARABLES.forEach(c => {
+      let va = a[c.campo], vb = b[c.campo];
+      if(c.esBool){ if(va !== vb) cambios.push({campo:c.label, antes: va?'Sí':'No', despues: vb?'Sí':'No'}); return; }
+      if(String(va) !== String(vb)) cambios.push({campo:c.label, antes: va===null||va===undefined?'':va, despues: vb===null||vb===undefined?'':vb});
+    });
+    if(cambios.length) modificadas.push({nv:b.nv, codigo:b.codigo, producto:b.producto, vendedor:b.vendedor, cambios});
+  });
+  return {nuevas, eliminadas, modificadas};
+}
+
 function suscribirseADatosNube(){
   if(!firebaseListo){ actualizarEstadoSync('local', 'Firebase no configurado — usando datos guardados en este navegador'); return; }
   actualizarEstadoSync('cargando', 'Conectando con la nube...');
@@ -561,14 +614,21 @@ function suscribirseADatosNube(){
   firebaseUnsub = firebaseDb.collection('nv_programadas').doc('actual').onSnapshot(doc => {
     if(!doc.exists){ actualizarEstadoSync('local', 'Aún no hay datos cargados en la nube'); return; }
     const data = doc.data();
-    if(!data.rows || !data.rows.length){ actualizarEstadoSync('local', 'Aún no hay datos cargados en la nube'); return; }
+    const rowsActual = data.rowsActual || data.rows || null; // compatibilidad con doc viejo sin historial
+    if(!rowsActual || !rowsActual.length){ actualizarEstadoSync('local', 'Aún no hay datos cargados en la nube'); return; }
     // Cache local por si se pierde la conexión más adelante
-    try{ localStorage.setItem(DATOS_KEY, JSON.stringify({rows:data.rows, filename:data.filename, savedAt:data.savedAt})); }catch(e){}
-    RESULT = procesarDatos(data.rows);
-    document.getElementById('filename').textContent = data.filename || '';
-    mostrarInfoDatosGuardados(data.filename || '(sin nombre)', data.savedAt);
+    try{ localStorage.setItem(DATOS_KEY, JSON.stringify({
+      rowsActual, filenameActual: data.filenameActual||data.filename, savedAtActual: data.savedAtActual||data.savedAt,
+      rowsAnterior: data.rowsAnterior||null, filenameAnterior: data.filenameAnterior||null, savedAtAnterior: data.savedAtAnterior||null
+    })); }catch(e){}
+    NV_ROWS_ACTUAL_RAW = {rows: rowsActual, filename: data.filenameActual||data.filename, savedAt: data.savedAtActual||data.savedAt};
+    RESULT = procesarDatos(rowsActual);
+    RESULT_ANTERIOR = data.rowsAnterior ? procesarDatos(data.rowsAnterior) : null;
+    NV_DIFF = data.rowsAnterior ? calcularDiffNV(data.rowsAnterior, rowsActual) : null;
+    document.getElementById('filename').textContent = data.filenameActual || data.filename || '';
+    mostrarInfoDatosGuardados(data.filenameActual || data.filename || '(sin nombre)', data.savedAtActual || data.savedAt);
     document.getElementById('esperandoDatosVendedor').classList.add('hidden');
-    actualizarEstadoSync('ok', `Sincronizado (${data.subidoPor||'admin'} · ${fmtFecha(new Date(data.savedAt))})`);
+    actualizarEstadoSync('ok', `Sincronizado (${data.subidoPor||'admin'} · ${fmtFecha(new Date(data.savedAtActual||data.savedAt))})`);
     if(sesion) render();
   }, err => {
     console.warn('Error escuchando Firebase, usando datos locales:', err);
@@ -1222,6 +1282,7 @@ function procesarDatos(rows){
    ============================================================ */
 function render(){
   document.getElementById('app').classList.remove('hidden');
+  renderNvDiff();
   renderDashCards();
   renderDashChart();
   renderDashVendorTable();
@@ -1644,10 +1705,13 @@ function aplicarSesion(){
   // Mientras llega la respuesta de Firebase, se usa el cache local como respaldo inmediato
   if(!RESULT){
     const guardado = cargarDatosGuardados();
-    if(guardado && guardado.rows && guardado.rows.length){
-      RESULT = procesarDatos(guardado.rows);
-      document.getElementById('filename').textContent = guardado.filename || '';
-      mostrarInfoDatosGuardados(guardado.filename || '(archivo guardado)', guardado.savedAt);
+    if(guardado && guardado.rowsActual && guardado.rowsActual.length){
+      NV_ROWS_ACTUAL_RAW = {rows: guardado.rowsActual, filename: guardado.filenameActual, savedAt: guardado.savedAtActual};
+      RESULT = procesarDatos(guardado.rowsActual);
+      RESULT_ANTERIOR = guardado.rowsAnterior ? procesarDatos(guardado.rowsAnterior) : null;
+      NV_DIFF = guardado.rowsAnterior ? calcularDiffNV(guardado.rowsAnterior, guardado.rowsActual) : null;
+      document.getElementById('filename').textContent = guardado.filenameActual || '';
+      mostrarInfoDatosGuardados(guardado.filenameActual || '(archivo guardado)', guardado.savedAtActual);
     }
   }
   document.getElementById('esperandoDatosVendedor').classList.toggle('hidden', !!RESULT || esAdmin);
@@ -2260,17 +2324,14 @@ function exportAllExcel(){
    ============================================================ */
 /* ============================================================
    Persistencia de datos cargados (localStorage) — quedan fijos
-   hasta que se cargue un archivo nuevo que los reemplace
+   hasta que se cargue un archivo nuevo que los reemplace.
+   Se guarda ACTUAL + ANTERIOR para poder revisar cambios.
    ============================================================ */
-const DATOS_KEY = 'nvprog_datos_v1';
+const DATOS_KEY = 'nvprog_datos_v2';
 
-function guardarDatosCargados(rows, filename){
+function guardarDatosCargados(paquete){
   try{
-    // Solo se guardan las filas vigentes (A/P) para no exceder el límite de localStorage
-    const relevantes = rows.filter(r => r && (r['nvEstado']==='A' || r['nvEstado']==='P'));
-    localStorage.setItem(DATOS_KEY, JSON.stringify({
-      rows: relevantes, filename, savedAt: new Date().toISOString()
-    }));
+    localStorage.setItem(DATOS_KEY, JSON.stringify(paquete));
     return true;
   }catch(e){
     console.warn('No se pudo guardar el archivo cargado en localStorage:', e);
@@ -2287,16 +2348,17 @@ function cargarDatosGuardados(){
 }
 
 function borrarDatosGuardados(){
-  if(!confirm('¿Borrar los datos cargados? Esto los borra para TODOS los usuarios sincronizados, no solo en este navegador. Tendrás que volver a subir el Excel.')) return;
+  if(!confirm('¿Borrar los datos cargados (actual y anterior)? Esto los borra para TODOS los usuarios sincronizados, no solo en este navegador. Tendrás que volver a subir el Excel.')) return;
   localStorage.removeItem(DATOS_KEY);
   if(firebaseListo){
     firebaseDb.collection('nv_programadas').doc('actual').delete().catch(err=>console.warn('No se pudo borrar en la nube:', err));
   }
-  RESULT = null;
+  RESULT = null; RESULT_ANTERIOR = null; NV_DIFF = null; NV_ROWS_ACTUAL_RAW = null;
   document.getElementById('filename').textContent = '';
   document.getElementById('datosGuardadosInfo').classList.add('hidden');
   document.getElementById('app').classList.add('hidden');
   document.getElementById('progDespachoPanel').classList.add('hidden');
+  document.getElementById('nvDiffPanel').classList.add('hidden');
 }
 
 function mostrarInfoDatosGuardados(filename, savedAt){
@@ -2317,6 +2379,40 @@ function mostrarInfoDatosGuardados(filename, savedAt){
   if(btnImport) btnImport.addEventListener('click', () => document.getElementById('importDatosInput').click());
 }
 
+function renderNvDiff(){
+  const panel = document.getElementById('nvDiffPanel');
+  if(!NV_DIFF || (!NV_DIFF.nuevas.length && !NV_DIFF.eliminadas.length && !NV_DIFF.modificadas.length)){
+    if(panel) panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  const {nuevas, eliminadas, modificadas} = NV_DIFF;
+  let html = `<div style="display:flex; gap:16px; margin-bottom:14px; font-size:13px; font-weight:700;">
+    <span style="color:var(--green);">🟢 ${nuevas.length} línea(s) nueva(s)</span>
+    <span style="color:var(--red);">🔴 ${eliminadas.length} línea(s) eliminada(s)</span>
+    <span style="color:var(--yellow);">🟡 ${modificadas.length} línea(s) modificada(s)</span>
+  </div>`;
+  if(nuevas.length){
+    html += `<div style="font-weight:700; margin-bottom:6px;">Nuevas:</div><div class="tablewrap" style="max-height:220px; margin-bottom:16px;"><table>
+      <thead><tr><th>NV</th><th>Código</th><th>Producto</th><th>Vendedor</th><th>Estado</th></tr></thead>
+      <tbody>${nuevas.map(l=>`<tr><td>${esc(l.nv)}</td><td>${esc(l.codigo)}</td><td>${esc(l.producto)}</td><td>${esc(l.vendedor)}</td><td>${esc(l.nvEstado)}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  if(eliminadas.length){
+    html += `<div style="font-weight:700; margin-bottom:6px;">Eliminadas (ya no están en A/P, o fueron cerradas/despachadas):</div><div class="tablewrap" style="max-height:220px; margin-bottom:16px;"><table>
+      <thead><tr><th>NV</th><th>Código</th><th>Producto</th><th>Vendedor</th><th>Estado</th></tr></thead>
+      <tbody>${eliminadas.map(l=>`<tr><td>${esc(l.nv)}</td><td>${esc(l.codigo)}</td><td>${esc(l.producto)}</td><td>${esc(l.vendedor)}</td><td>${esc(l.nvEstado)}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  if(modificadas.length){
+    html += `<div style="font-weight:700; margin-bottom:6px;">Modificadas:</div><div class="tablewrap" style="max-height:280px;"><table>
+      <thead><tr><th>NV</th><th>Código</th><th>Producto</th><th>Campo</th><th>Antes</th><th>Después</th></tr></thead>
+      <tbody>${modificadas.map(m=>m.cambios.map((c,i)=>`<tr>
+        ${i===0?`<td rowspan="${m.cambios.length}">${esc(m.nv)}</td><td rowspan="${m.cambios.length}">${esc(m.codigo)}</td><td rowspan="${m.cambios.length}">${esc(m.producto)}</td>`:''}
+        <td>${esc(c.campo)}</td><td>${esc(c.antes)}</td><td style="font-weight:700; color:var(--yellow);">${esc(c.despues)}</td>
+      </tr>`).join('')).join('')}</tbody></table></div>`;
+  }
+  document.getElementById('nvDiffBody').innerHTML = html;
+}
+
 function exportarDatosCargados(){
   const guardado = cargarDatosGuardados();
   if(!guardado){ alert('No hay datos cargados para exportar.'); return; }
@@ -2332,11 +2428,15 @@ function importarDatosCargados(file){
   reader.onload = e => {
     try{
       const parsed = JSON.parse(e.target.result);
-      if(!parsed.rows || !Array.isArray(parsed.rows)) throw new Error('Formato inválido');
-      localStorage.setItem(DATOS_KEY, JSON.stringify(parsed));
-      RESULT = procesarDatos(parsed.rows);
-      document.getElementById('filename').textContent = parsed.filename || '';
-      mostrarInfoDatosGuardados(parsed.filename || '(archivo importado)', parsed.savedAt || new Date().toISOString());
+      const rowsActual = parsed.rowsActual || parsed.rows;
+      if(!rowsActual || !Array.isArray(rowsActual)) throw new Error('Formato inválido');
+      guardarDatosCargados(parsed);
+      NV_ROWS_ACTUAL_RAW = {rows: rowsActual, filename: parsed.filenameActual||parsed.filename, savedAt: parsed.savedAtActual||parsed.savedAt};
+      RESULT = procesarDatos(rowsActual);
+      RESULT_ANTERIOR = parsed.rowsAnterior ? procesarDatos(parsed.rowsAnterior) : null;
+      NV_DIFF = parsed.rowsAnterior ? calcularDiffNV(parsed.rowsAnterior, rowsActual) : null;
+      document.getElementById('filename').textContent = parsed.filenameActual || parsed.filename || '';
+      mostrarInfoDatosGuardados(parsed.filenameActual || parsed.filename || '(archivo importado)', parsed.savedAtActual || parsed.savedAt || new Date().toISOString());
       render();
       alert('Datos importados correctamente.');
     }catch(err){
@@ -2354,11 +2454,26 @@ function handleFile(file){
     const wb = XLSX.read(data, {type:'array', cellDates:false});
     const sheetName = wb.SheetNames.includes('Hoja1') ? 'Hoja1' : wb.SheetNames[0];
     const ws = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, {defval:null});
-    RESULT = procesarDatos(rows);
-    guardarDatosCargados(rows, file.name);
-    mostrarInfoDatosGuardados(file.name, new Date().toISOString());
-    guardarDatosEnNube(rows, file.name); // sincroniza para todos los usuarios
+    const rowsNuevo = XLSX.utils.sheet_to_json(ws, {defval:null});
+
+    let previo = NV_ROWS_ACTUAL_RAW;
+    if(!previo){
+      const local = cargarDatosGuardados();
+      if(local && local.rowsActual) previo = {rows: local.rowsActual, filename: local.filenameActual, savedAt: local.savedAtActual};
+    }
+    const rowsNuevoTrim = trimirFilas(rowsNuevo);
+
+    RESULT = procesarDatos(rowsNuevo);
+    RESULT_ANTERIOR = previo ? procesarDatos(previo.rows) : null;
+    NV_DIFF = previo ? calcularDiffNV(previo.rows, rowsNuevoTrim) : null;
+    NV_ROWS_ACTUAL_RAW = {rows: rowsNuevoTrim, filename: file.name, savedAt: new Date().toISOString()};
+
+    guardarDatosCargados({
+      rowsActual: rowsNuevoTrim, filenameActual: file.name, savedAtActual: NV_ROWS_ACTUAL_RAW.savedAt,
+      rowsAnterior: previo ? previo.rows : null, filenameAnterior: previo ? previo.filename : null, savedAtAnterior: previo ? previo.savedAt : null
+    });
+    mostrarInfoDatosGuardados(file.name, NV_ROWS_ACTUAL_RAW.savedAt);
+    guardarDatosEnNube(rowsNuevo, file.name); // sincroniza para todos los usuarios (desplaza actual->anterior en la nube también)
     currentVendor = null;
     currentTipo = 'Retira Cliente';
     render();
@@ -2390,6 +2505,9 @@ document.getElementById('prodLimpiarFechas').addEventListener('click', () => {
 });
 document.getElementById('btnCerrarDiff').addEventListener('click', () => {
   document.getElementById('prodDiffPanel').classList.add('hidden');
+});
+document.getElementById('btnCerrarNvDiff').addEventListener('click', () => {
+  document.getElementById('nvDiffPanel').classList.add('hidden');
 });
 
 if('serviceWorker' in navigator){
