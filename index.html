@@ -412,6 +412,51 @@
     </div>
   </div>
 
+  <div id="tabProduccion" class="hidden">
+    <div class="section-title">Programa de Producción</div>
+
+    <div id="prodUploadWrap" class="uploadbox hidden">
+      <button class="uploadbtn" id="btnPickProd">Cargar Programa de Producción (ENTXCOD.xlsx)</button>
+      <input type="file" id="fileInputProd" accept=".xlsx,.xls">
+      <div class="uploadhint">Al cargarlo, se sincroniza automáticamente para todos los usuarios (reemplaza al anterior).</div>
+      <div class="filename" id="filenameProd"></div>
+    </div>
+    <div id="syncStatusWrapProd"><span id="syncStatusProd" class="sync-badge sync-local">📴 Iniciando...</span></div>
+    <div id="prodDatosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px; margin-bottom:16px; color:var(--navy-deep);"></div>
+    <div id="esperandoProduccion" class="hidden panel-body pad" style="background:#fff; border:1px solid var(--line); border-radius:10px; margin-bottom:16px; text-align:center; color:var(--steel); padding:20px;">
+      Esperando a que el Administrador cargue el Programa de Producción.
+    </div>
+
+    <div id="prodDiffPanel" class="panel warn-panel hidden">
+      <div class="panel-head">
+        <h2>⚠️ Diferencias respecto a la versión anterior</h2>
+        <button class="btn btn-ghost" id="btnCerrarDiff" style="padding:5px 12px;">Cerrar</button>
+      </div>
+      <div class="panel-body pad" id="prodDiffBody"></div>
+    </div>
+
+    <div id="prodPanel" class="panel hidden">
+      <div class="panel-head">
+        <h2>🏭 Programa de Producción por lote</h2>
+        <button class="btn btn-export" id="prodExportBtn">⬇ Exportar Excel</button>
+      </div>
+      <div class="cards" id="prodCards" style="padding:14px 16px 0;"></div>
+      <div class="toolbar" id="prodFiltersWrap">
+        <select id="prodMaquinaFiltro" style="padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;"></select>
+        <input type="date" id="prodFechaDesde" style="padding:7px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;" title="Desde">
+        <input type="date" id="prodFechaHasta" style="padding:7px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;" title="Hasta">
+        <button class="btn btn-ghost" id="prodLimpiarFechas" style="padding:7px 12px;">Limpiar fechas</button>
+        <input class="search" id="prodSearchBox" placeholder="Buscar por código, producto, máquina o lote...">
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="prodTable"></table>
+        </div>
+      </div>
+      <div class="footer-note" id="prodFootnote"></div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -531,6 +576,132 @@ function suscribirseADatosNube(){
   });
 }
 
+/* -------- Sincronización del Programa de Producción: guarda ACTUAL + ANTERIOR -------- */
+const PROD_DATOS_KEY = 'nvprog_produccion_v2';
+let RESULT_PROD = null;
+let RESULT_PROD_ANTERIOR = null;
+let PROD_DIFF = null;
+let PROD_AOA_ACTUAL_RAW = null;
+let firebaseUnsubProd = null;
+
+function actualizarEstadoSyncProd(estado, detalle){
+  const el = document.getElementById('syncStatusProd');
+  if(!el) return;
+  const iconos = {ok:'☁️', local:'📴', cargando:'⏳', error:'⚠️'};
+  el.textContent = `${iconos[estado]||''} ${detalle||''}`;
+  el.className = 'sync-badge sync-' + estado;
+}
+
+function guardarProduccionLocal(paquete){
+  try{ localStorage.setItem(PROD_DATOS_KEY, JSON.stringify(paquete)); }catch(e){}
+}
+function cargarProduccionLocal(){
+  try{ const raw = localStorage.getItem(PROD_DATOS_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
+}
+function mostrarInfoProduccion(filename, savedAt){
+  const el = document.getElementById('prodDatosInfo');
+  const fecha = new Date(savedAt);
+  el.innerHTML = `📌 Programa cargado: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')})` +
+    (sesion && sesion.role==='admin' ? ` <button class="btn btn-ghost" id="btnBorrarProduccion" style="padding:3px 10px; margin-left:8px;">Borrar</button>` : '');
+  el.classList.remove('hidden');
+  const btn = document.getElementById('btnBorrarProduccion');
+  if(btn) btn.addEventListener('click', borrarProduccion);
+}
+function borrarProduccion(){
+  if(!confirm('¿Borrar el Programa de Producción (actual y anterior)? Se borra para TODOS los usuarios sincronizados.')) return;
+  localStorage.removeItem(PROD_DATOS_KEY);
+  if(firebaseListo) firebaseDb.collection('nv_programadas').doc('produccion').delete().catch(err=>console.warn(err));
+  RESULT_PROD = null; RESULT_PROD_ANTERIOR = null; PROD_DIFF = null;
+  document.getElementById('filenameProd').textContent = '';
+  document.getElementById('prodDatosInfo').classList.add('hidden');
+  document.getElementById('prodPanel').classList.add('hidden');
+  document.getElementById('prodDiffPanel').classList.add('hidden');
+}
+
+/* -------- Cálculo de diferencias entre versión anterior y actual -------- */
+const CAMPOS_COMPARABLES = [
+  {campo:'maquina', label:'Máquina'},
+  {campo:'inicio', label:'Inicio', esFecha:true},
+  {campo:'termino', label:'Término', esFecha:true},
+  {campo:'dh', label:'DH'},
+  {campo:'cantidadLote', label:'Cantidad lote'},
+  {campo:'programa', label:'Programa total'}
+];
+function calcularDiffProduccion(lotesAnterior, lotesActual){
+  const keyOf = l => l.codigo + '|' + l.lote;
+  const mapAnterior = {}; lotesAnterior.forEach(l => mapAnterior[keyOf(l)] = l);
+  const mapActual = {}; lotesActual.forEach(l => mapActual[keyOf(l)] = l);
+
+  const nuevos = [], eliminados = [], modificados = [];
+  Object.keys(mapActual).forEach(k => {
+    if(!(k in mapAnterior)) nuevos.push(mapActual[k]);
+  });
+  Object.keys(mapAnterior).forEach(k => {
+    if(!(k in mapActual)) eliminados.push(mapAnterior[k]);
+  });
+  Object.keys(mapActual).forEach(k => {
+    if(!(k in mapAnterior)) return;
+    const a = mapAnterior[k], b = mapActual[k];
+    const cambios = [];
+    CAMPOS_COMPARABLES.forEach(c => {
+      let va = a[c.campo], vb = b[c.campo];
+      if(c.esFecha){ va = va ? va.getTime() : null; vb = vb ? vb.getTime() : null; }
+      if(va !== vb) cambios.push({
+        campo: c.label,
+        antes: c.esFecha ? fmtFecha(a[c.campo]) : (a[c.campo]===null?'':a[c.campo]),
+        despues: c.esFecha ? fmtFecha(b[c.campo]) : (b[c.campo]===null?'':b[c.campo])
+      });
+    });
+    if(cambios.length) modificados.push({codigo:b.codigo, descripcion:b.descripcion, lote:b.lote, cambios});
+  });
+  return {nuevos, eliminados, modificados};
+}
+
+function guardarProduccionEnNube(aoaNuevo, filenameNuevo){
+  if(!firebaseListo){ actualizarEstadoSyncProd('local', 'Firebase no configurado — datos solo en este navegador'); return Promise.resolve(false); }
+  actualizarEstadoSyncProd('cargando', 'Subiendo a la nube...');
+  const docRef = firebaseDb.collection('nv_programadas').doc('produccion');
+  return docRef.get().then(snap => {
+    const previo = snap.exists ? snap.data() : null;
+    const payload = {
+      aoaActual: aoaNuevo, filenameActual: filenameNuevo, savedAtActual: new Date().toISOString(),
+      aoaAnterior: previo ? (previo.aoaActual || null) : null,
+      filenameAnterior: previo ? (previo.filenameActual || null) : null,
+      savedAtAnterior: previo ? (previo.savedAtActual || null) : null,
+      subidoPor: sesion ? sesion.username : 'desconocido', claveAdmin: FIREBASE_ADMIN_KEY
+    };
+    return docRef.set(payload);
+  }).then(() => { actualizarEstadoSyncProd('ok', 'Sincronizado con la nube'); return true; })
+    .catch(err => { console.error(err); actualizarEstadoSyncProd('error', 'No se pudo subir a la nube'); return false; });
+}
+
+function aplicarDatosProduccion(data){
+  guardarProduccionLocal(data);
+  PROD_AOA_ACTUAL_RAW = {aoa: data.aoaActual, filename: data.filenameActual, savedAt: data.savedAtActual};
+  RESULT_PROD = procesarProduccion(data.aoaActual);
+  RESULT_PROD_ANTERIOR = data.aoaAnterior ? procesarProduccion(data.aoaAnterior) : null;
+  PROD_DIFF = RESULT_PROD_ANTERIOR ? calcularDiffProduccion(RESULT_PROD_ANTERIOR.lotes, RESULT_PROD.lotes) : null;
+  document.getElementById('filenameProd').textContent = data.filenameActual || '';
+  mostrarInfoProduccion(data.filenameActual || '(sin nombre)', data.savedAtActual);
+  document.getElementById('esperandoProduccion').classList.add('hidden');
+}
+
+function suscribirseAProduccionNube(){
+  if(!firebaseListo){ actualizarEstadoSyncProd('local', 'Firebase no configurado — usando datos guardados en este navegador'); return; }
+  actualizarEstadoSyncProd('cargando', 'Conectando con la nube...');
+  if(firebaseUnsubProd) firebaseUnsubProd();
+  firebaseUnsubProd = firebaseDb.collection('nv_programadas').doc('produccion').onSnapshot(doc => {
+    if(!doc.exists || !doc.data().aoaActual){ actualizarEstadoSyncProd('local', 'Aún no hay Programa de Producción cargado'); return; }
+    const data = doc.data();
+    aplicarDatosProduccion(data);
+    actualizarEstadoSyncProd('ok', `Sincronizado (${data.subidoPor||'admin'} · ${fmtFecha(new Date(data.savedAtActual))})`);
+    if(sesion) renderProduccion();
+  }, err => {
+    console.warn('Error escuchando produccion en Firebase:', err);
+    actualizarEstadoSyncProd('error', 'Sin conexión a la nube — usando datos locales guardados');
+  });
+}
+
 const CONTACTOS = {
   'BASCUÑAN Z. ROSA':      [{nombre:'ROSITA BASCUÑAN', email:'rbascunan@petroflex.cl', cel:'56982301190'}],
   'TORO L. VIRGINIA':      [{nombre:'VIRGINIA TORO', email:'vtoro@petroflex.cl', cel:'56982301188'}],
@@ -620,6 +791,10 @@ let currentSearch = '';
 let currentNoProgTipo = 'Todos';
 let pdSearch = '';
 let pdVendedorFiltro = '__TODOS__';
+let prodSearch = '';
+let prodMaquinaFiltro = '__TODAS__';
+let prodFechaDesde = null;
+let prodFechaHasta = null;
 let pdEstadoFiltro = 'Todos';
 let pdProgFiltro = 'Todos';
 
@@ -672,6 +847,57 @@ function esc(s){
 /* ============================================================
    Procesamiento principal
    ============================================================ */
+/* ============================================================
+   Programa de Producción (ENTXCOD.xlsx) — hasta 6 lotes por código
+   ============================================================ */
+function procesarProduccion(aoa){
+  // Buscar la fila de encabezados (la que empieza con "Código")
+  let headerRow = -1;
+  for(let i=0;i<Math.min(aoa.length,10);i++){
+    if(aoa[i] && String(aoa[i][0]||'').trim()==='Código'){ headerRow = i; break; }
+  }
+  if(headerRow === -1) return { lotes: [], maquinas: [], productos: 0 };
+
+  const headers = aoa[headerRow].map(h => (h===undefined||h===null) ? '' : String(h).trim());
+  const idx = name => headers.indexOf(name);
+  const iCodigo = idx('Código'), iDesc = idx('Descripción'), iUM = idx('UM'), iProg = idx('Programa');
+
+  const lotes = [];
+  for(let r=headerRow+1; r<aoa.length; r++){
+    const row = aoa[r];
+    if(!row) continue;
+    const codigo = row[iCodigo];
+    if(codigo===undefined || codigo===null || codigo==='' || codigo===0) continue;
+    const descripcion = row[iDesc];
+    if(!descripcion) continue; // filas basura (código 0 u otras sin descripción)
+    const um = row[iUM];
+    const programa = Number(row[iProg])||0;
+
+    for(let n=1; n<=6; n++){
+      const iLote = idx('lote'+n), iMaq = idx('máq'+n), iIni = idx('inicio'+n), iTer = idx('termino'+n), iDH = idx('DH'+n);
+      const maquina = iMaq>=0 ? row[iMaq] : null;
+      const inicio = iIni>=0 ? excelSerialToDate(row[iIni]) : null;
+      const termino = iTer>=0 ? excelSerialToDate(row[iTer]) : null;
+      if(!maquina && !inicio && !termino) continue; // lote no usado
+      lotes.push({
+        codigo: String(codigo).trim(), descripcion: String(descripcion).trim(), um: um||'',
+        programa, lote: n, cantidadLote: iLote>=0 ? Number(row[iLote])||0 : null,
+        maquina: maquina ? String(maquina).trim() : '',
+        inicio, termino,
+        dh: iDH>=0 ? Number(row[iDH])||0 : null
+      });
+    }
+  }
+  lotes.sort((a,b)=>{
+    const fa = a.inicio ? a.inicio.getTime() : Infinity;
+    const fb = b.inicio ? b.inicio.getTime() : Infinity;
+    return fa - fb;
+  });
+  const maquinas = [...new Set(lotes.map(l=>l.maquina).filter(Boolean))].sort();
+  const productos = new Set(lotes.map(l=>l.codigo)).size;
+  return { lotes, maquinas, productos };
+}
+
 function procesarDatos(rows){
   const clean = rows.map(r => ({
     fecha_emis: r['fecha_emis'],
@@ -1397,7 +1623,9 @@ function logout(){
   sesion = null;
   tabActivo = null;
   RESULT = null;
+  RESULT_PROD = null;
   if(firebaseUnsub){ firebaseUnsub(); firebaseUnsub = null; }
+  if(firebaseUnsubProd){ firebaseUnsubProd(); firebaseUnsubProd = null; }
   document.getElementById('loginWrap').classList.remove('hidden');
   document.getElementById('mainWrap').classList.add('hidden');
   document.getElementById('sesionBar').classList.add('hidden');
@@ -1426,9 +1654,20 @@ function aplicarSesion(){
 
   suscribirseADatosNube();
 
+  // Programa de Producción: cache local inmediato + suscripción a la nube
+  if(!RESULT_PROD){
+    const guardadoProd = cargarProduccionLocal();
+    if(guardadoProd && guardadoProd.aoaActual && guardadoProd.aoaActual.length){
+      aplicarDatosProduccion(guardadoProd);
+    }
+  }
+  document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || esAdmin);
+  suscribirseAProduccionNube();
+
   renderTabsNav();
   if(sesion.role === 'admin') renderUsersTable();
   if(RESULT) render(); else renderProgramaDespacho();
+  renderProduccion();
 }
 
 let tabActivo = null;
@@ -1438,6 +1677,7 @@ function tabsDisponibles(){
   const tabs = [];
   if(esAdmin || esGerencia) tabs.push({id:'tabAnalisis', label:'📊 Análisis'});
   tabs.push({id:'tabDespacho', label:'📅 Programa de Despacho'});
+  tabs.push({id:'tabProduccion', label:'🏭 Programa de Producción'});
   if(esAdmin) tabs.push({id:'tabMaestro', label:'🔧 Maestro'});
   return tabs;
 }
@@ -1456,7 +1696,7 @@ function renderTabsNav(){
 }
 
 function aplicarTabActivo(){
-  ['tabAnalisis','tabDespacho','tabMaestro'].forEach(id => {
+  ['tabAnalisis','tabDespacho','tabProduccion','tabMaestro'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', id !== tabActivo);
   });
@@ -1682,6 +1922,175 @@ function renderProgramaDespachoTabla(){
       </tbody>`;
   }
   document.getElementById('pdFootnote').textContent = `${rows.length} de ${base.length} líneas mostradas. Verde = programada para esta semana (lun-dom) · Naranjo = programada para otra semana · Rojo = sin programar.`;
+}
+
+/* ============================================================
+   Render — Programa de Producción
+   ============================================================ */
+function renderProduccion(){
+  const esAdmin = sesion && sesion.role === 'admin';
+  document.getElementById('prodUploadWrap').classList.toggle('hidden', !esAdmin);
+  document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || esAdmin);
+  if(!RESULT_PROD) return;
+  document.getElementById('prodPanel').classList.remove('hidden');
+  renderProdCards();
+  renderProdFiltros();
+  renderProdTable();
+  renderProdDiff();
+}
+
+function renderProdDiff(){
+  const panel = document.getElementById('prodDiffPanel');
+  if(!PROD_DIFF || (!PROD_DIFF.nuevos.length && !PROD_DIFF.eliminados.length && !PROD_DIFF.modificados.length)){
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  const {nuevos, eliminados, modificados} = PROD_DIFF;
+  let html = `<div style="display:flex; gap:16px; margin-bottom:14px; font-size:13px; font-weight:700;">
+    <span style="color:var(--green);">🟢 ${nuevos.length} lote(s) nuevo(s)</span>
+    <span style="color:var(--red);">🔴 ${eliminados.length} lote(s) eliminado(s)</span>
+    <span style="color:var(--yellow);">🟡 ${modificados.length} lote(s) modificado(s)</span>
+  </div>`;
+
+  if(nuevos.length){
+    html += `<div style="font-weight:700; margin-bottom:6px;">Nuevos:</div><div class="tablewrap" style="max-height:220px; margin-bottom:16px;"><table>
+      <thead><tr><th>Código</th><th>Descripción</th><th>Lote</th><th>Máquina</th><th>Inicio</th><th>Término</th></tr></thead>
+      <tbody>${nuevos.map(l=>`<tr>
+        <td>${esc(l.codigo)}</td><td>${esc(l.descripcion)}</td><td>${l.lote}</td>
+        <td>${esc(l.maquina)}</td><td>${fmtFecha(l.inicio)}</td><td>${fmtFecha(l.termino)}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+  if(eliminados.length){
+    html += `<div style="font-weight:700; margin-bottom:6px;">Eliminados:</div><div class="tablewrap" style="max-height:220px; margin-bottom:16px;"><table>
+      <thead><tr><th>Código</th><th>Descripción</th><th>Lote</th><th>Máquina</th><th>Inicio</th><th>Término</th></tr></thead>
+      <tbody>${eliminados.map(l=>`<tr>
+        <td>${esc(l.codigo)}</td><td>${esc(l.descripcion)}</td><td>${l.lote}</td>
+        <td>${esc(l.maquina)}</td><td>${fmtFecha(l.inicio)}</td><td>${fmtFecha(l.termino)}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+  if(modificados.length){
+    html += `<div style="font-weight:700; margin-bottom:6px;">Modificados:</div><div class="tablewrap" style="max-height:280px;"><table>
+      <thead><tr><th>Código</th><th>Descripción</th><th>Lote</th><th>Campo</th><th>Antes</th><th>Después</th></tr></thead>
+      <tbody>${modificados.map(m=>m.cambios.map((c,i)=>`<tr>
+        ${i===0?`<td rowspan="${m.cambios.length}">${esc(m.codigo)}</td><td rowspan="${m.cambios.length}">${esc(m.descripcion)}</td><td rowspan="${m.cambios.length}">${m.lote}</td>`:''}
+        <td>${esc(c.campo)}</td><td>${esc(c.antes)}</td><td style="font-weight:700; color:var(--yellow);">${esc(c.despues)}</td>
+      </tr>`).join('')).join('')}</tbody></table></div>`;
+  }
+  document.getElementById('prodDiffBody').innerHTML = html;
+}
+
+function renderProdCards(){
+  const l = RESULT_PROD.lotes;
+  const totalProgramado = l.reduce((s,x)=>s+ (x.cantidadLote||0), 0);
+  const fechas = l.map(x=>x.inicio).filter(Boolean);
+  const cards = [
+    {label:'Productos', value: RESULT_PROD.productos},
+    {label:'Lotes programados', value: l.length},
+    {label:'Máquinas en uso', value: RESULT_PROD.maquinas.length},
+    {label:'Cantidad total programada', value: num(totalProgramado)},
+  ];
+  document.getElementById('prodCards').innerHTML = cards.map(c=>`
+    <div class="card"><div class="label">${esc(c.label)}</div><div class="value">${c.value}</div></div>
+  `).join('');
+}
+
+function renderProdFiltros(){
+  const sel = document.getElementById('prodMaquinaFiltro');
+  if(!sel.dataset.filled){
+    sel.innerHTML = `<option value="__TODAS__">Todas las máquinas</option>` +
+      RESULT_PROD.maquinas.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    sel.dataset.filled = '1';
+    sel.addEventListener('change', e => { prodMaquinaFiltro = e.target.value; renderProdTable(); });
+  }
+}
+
+function renderProdTable(){
+  let rows = RESULT_PROD.lotes;
+  const q = prodSearch.trim().toLowerCase();
+  if(q) rows = rows.filter(r =>
+    String(r.codigo).toLowerCase().includes(q) ||
+    String(r.descripcion||'').toLowerCase().includes(q) ||
+    String(r.maquina||'').toLowerCase().includes(q) ||
+    String(r.lote).includes(q)
+  );
+  if(prodMaquinaFiltro !== '__TODAS__') rows = rows.filter(r => r.maquina === prodMaquinaFiltro);
+  if(prodFechaDesde) rows = rows.filter(r => r.inicio && r.inicio.getTime() >= prodFechaDesde.getTime());
+  if(prodFechaHasta) rows = rows.filter(r => r.termino && r.termino.getTime() <= prodFechaHasta.getTime());
+
+  if(!rows.length){
+    document.getElementById('prodTable').innerHTML = `<tbody><tr><td class="empty">No hay lotes para este filtro.</td></tr></tbody>`;
+  } else {
+    document.getElementById('prodTable').innerHTML = `
+      <thead><tr>
+        <th>Código</th><th>Descripción</th><th>UM</th><th>Programa total</th>
+        <th>Lote</th><th>Cant. lote</th><th>Máquina</th><th>Inicio</th><th>Término</th><th>DH</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r=>`<tr>
+          <td>${esc(r.codigo)}</td>
+          <td>${esc(r.descripcion)}</td>
+          <td>${esc(r.um)}</td>
+          <td>${num(r.programa)}</td>
+          <td>${r.lote}</td>
+          <td>${r.cantidadLote!==null?num(r.cantidadLote):''}</td>
+          <td>${esc(r.maquina)}</td>
+          <td>${fmtFecha(r.inicio)}</td>
+          <td>${fmtFecha(r.termino)}</td>
+          <td>${r.dh!==null?r.dh:''}</td>
+        </tr>`).join('')}
+      </tbody>`;
+  }
+  document.getElementById('prodFootnote').textContent = `${rows.length} de ${RESULT_PROD.lotes.length} lotes mostrados.`;
+}
+
+function prodExportExcel(){
+  if(!RESULT_PROD) return;
+  let rows = RESULT_PROD.lotes;
+  const q = prodSearch.trim().toLowerCase();
+  if(q) rows = rows.filter(r =>
+    String(r.codigo).toLowerCase().includes(q) || String(r.descripcion||'').toLowerCase().includes(q) ||
+    String(r.maquina||'').toLowerCase().includes(q) || String(r.lote).includes(q));
+  if(prodMaquinaFiltro !== '__TODAS__') rows = rows.filter(r => r.maquina === prodMaquinaFiltro);
+  if(prodFechaDesde) rows = rows.filter(r => r.inicio && r.inicio.getTime() >= prodFechaDesde.getTime());
+  if(prodFechaHasta) rows = rows.filter(r => r.termino && r.termino.getTime() <= prodFechaHasta.getTime());
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows.map(r=>({
+    'Código': r.codigo, 'Descripción': r.descripcion, 'UM': r.um, 'Programa Total': r.programa,
+    'Lote': r.lote, 'Cantidad Lote': r.cantidadLote, 'Máquina': r.maquina,
+    'Inicio': fmtFecha(r.inicio), 'Término': fmtFecha(r.termino), 'DH': r.dh
+  })));
+  XLSX.utils.book_append_sheet(wb, ws, 'Programa Produccion');
+  XLSX.writeFile(wb, `Programa_Produccion_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function handleFileProd(file){
+  document.getElementById('filenameProd').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const data = new Uint8Array(e.target.result);
+    const wb = XLSX.read(data, {type:'array', cellDates:false});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const aoaNuevo = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+
+    let previo = PROD_AOA_ACTUAL_RAW;
+    if(!previo){
+      const local = cargarProduccionLocal();
+      if(local && local.aoaActual) previo = {aoa: local.aoaActual, filename: local.filenameActual, savedAt: local.savedAtActual};
+    }
+
+    const payload = {
+      aoaActual: aoaNuevo, filenameActual: file.name, savedAtActual: new Date().toISOString(),
+      aoaAnterior: previo ? previo.aoa : null,
+      filenameAnterior: previo ? previo.filename : null,
+      savedAtAnterior: previo ? previo.savedAt : null
+    };
+    aplicarDatosProduccion(payload);
+    renderProduccion();
+    guardarProduccionEnNube(aoaNuevo, file.name); // sincroniza para todos (ya desplaza actual->anterior en la nube también)
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 function pdExportExcel(){
@@ -1966,6 +2375,22 @@ uploadbox.addEventListener('drop', e => { if(e.dataTransfer.files[0]) handleFile
 
 document.getElementById('btnExportAll').addEventListener('click', exportAllExcel);
 document.getElementById('searchBox').addEventListener('input', e => { currentSearch = e.target.value; renderVendorTable(); });
+
+document.getElementById('btnPickProd').addEventListener('click', () => document.getElementById('fileInputProd').click());
+document.getElementById('fileInputProd').addEventListener('change', e => { if(e.target.files[0]) handleFileProd(e.target.files[0]); });
+document.getElementById('prodExportBtn').addEventListener('click', prodExportExcel);
+document.getElementById('prodSearchBox').addEventListener('input', e => { prodSearch = e.target.value; renderProdTable(); });
+document.getElementById('prodFechaDesde').addEventListener('change', e => { prodFechaDesde = e.target.value ? new Date(e.target.value+'T00:00:00') : null; renderProdTable(); });
+document.getElementById('prodFechaHasta').addEventListener('change', e => { prodFechaHasta = e.target.value ? new Date(e.target.value+'T23:59:59') : null; renderProdTable(); });
+document.getElementById('prodLimpiarFechas').addEventListener('click', () => {
+  prodFechaDesde = null; prodFechaHasta = null;
+  document.getElementById('prodFechaDesde').value = '';
+  document.getElementById('prodFechaHasta').value = '';
+  renderProdTable();
+});
+document.getElementById('btnCerrarDiff').addEventListener('click', () => {
+  document.getElementById('prodDiffPanel').classList.add('hidden');
+});
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
