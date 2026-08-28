@@ -267,14 +267,6 @@
   <div id="datosGuardadosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px; margin-bottom:16px; color:var(--navy-deep);"></div>
   <input type="file" id="importDatosInput" accept=".json" class="hidden">
 
-  <div id="nvDiffPanel" class="panel warn-panel hidden">
-    <div class="panel-head">
-      <h2>⚠️ Diferencias respecto a la versión anterior de NV</h2>
-      <button class="btn btn-ghost" id="btnCerrarNvDiff" style="padding:5px 12px;">Cerrar</button>
-    </div>
-    <div class="panel-body pad" id="nvDiffBody"></div>
-  </div>
-
   <div id="tabMaestro" class="hidden">
     <div id="adminPanel" class="panel">
       <div class="panel-head">
@@ -295,6 +287,19 @@
         <button class="btn btn-ghost" id="btnImportUsers">⬆ Importar usuarios (JSON)</button>
         <input type="file" id="importUsersInput" accept=".json" class="hidden">
       </div>
+    </div>
+
+    <div id="rolesPanel" class="panel">
+      <div class="panel-head">
+        <h2>🛡️ Roles y Permisos</h2>
+        <button class="btn btn-export" id="btnNuevoRol">+ Nuevo rol</button>
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="rolesConfigTable"></table>
+        </div>
+      </div>
+      <div class="footer-note">Marca o desmarca los permisos de cada rol — se guardan y sincronizan al instante para todos los usuarios con ese rol. El nombre visible también es editable (haz clic y escribe).</div>
     </div>
   </div>
 
@@ -726,6 +731,95 @@ const RETENCION_MOTIVOS_KEY = 'nvprog_retencion_motivos_v1';
 let retencionMotivos = {};
 let firebaseUnsubRetenciones = null;
 
+/* -------- Seguimiento "días sin programar" + alertas ntfy -------- */
+const UMBRAL_DIAS_SIN_PROGRAMAR = 3;
+const NTFY_TOPIC = 'petroflex-nv-sinprogramar-9k2'; // mismo patrón de topic que Cubicación PWA
+const SEGUIMIENTO_KEY = 'nvprog_seguimiento_v1';
+let seguimientoSinProgramar = {}; // { 'nv|codigo': { desde: ISOString, notificado: bool } }
+let firebaseUnsubSeguimiento = null;
+
+function cargarSeguimientoLocal(){
+  try{ const raw = localStorage.getItem(SEGUIMIENTO_KEY); return raw ? JSON.parse(raw) : {}; }catch(e){ return {}; }
+}
+function guardarSeguimientoLocal(obj){
+  try{ localStorage.setItem(SEGUIMIENTO_KEY, JSON.stringify(obj)); }catch(e){}
+}
+
+function enviarNotificacionNtfy(titulo, mensaje, prioridad){
+  fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+    method: 'POST',
+    headers: { 'Title': titulo, 'Priority': prioridad || 'default', 'Tags': 'warning' },
+    body: mensaje
+  }).catch(err => console.warn('No se pudo enviar la notificación ntfy:', err));
+}
+
+function diasSinProgramar(nv, codigo){
+  const key = nv + '|' + codigo;
+  const item = seguimientoSinProgramar[key];
+  if(!item) return 0;
+  return (Date.now() - new Date(item.desde).getTime()) / 86400000;
+}
+
+/* Solo se ejecuta cuando el Admin carga un Excel nuevo: actualiza el seguimiento,
+   sincroniza a la nube y dispara la notificación ntfy si corresponde. Los demás
+   usuarios solo LEEN este seguimiento (suscribirseASeguimiento), sin re-notificar. */
+function actualizarSeguimientoSinProgramar(){
+  if(!RESULT || !RESULT.programaDespacho) return;
+  const ahoraISO = new Date().toISOString();
+  const actuales = {};
+  RESULT.programaDespacho.forEach(r => {
+    if(!r.fprogFecha) actuales[r.nv + '|' + r.codigo] = r;
+  });
+
+  const nuevoSeguimiento = {};
+  const superanUmbral = [];
+  Object.keys(actuales).forEach(key => {
+    const existente = seguimientoSinProgramar[key];
+    const desde = existente ? existente.desde : ahoraISO;
+    const dias = (Date.now() - new Date(desde).getTime()) / 86400000;
+    const yaNotificado = existente ? !!existente.notificado : false;
+    nuevoSeguimiento[key] = { desde, notificado: yaNotificado };
+    if(dias >= UMBRAL_DIAS_SIN_PROGRAMAR && !yaNotificado){
+      nuevoSeguimiento[key].notificado = true;
+      const r = actuales[key];
+      superanUmbral.push({nv:r.nv, cliente:r.cliente, vendedor:r.vendedor, dias: Math.floor(dias)});
+    }
+  });
+  // Las que ya no están sin programar (se programaron o se despacharon) se sueltan solas
+  // al no copiarse a nuevoSeguimiento — si vuelven a quedar sin programar, el contador arranca de cero.
+
+  seguimientoSinProgramar = nuevoSeguimiento;
+  guardarSeguimientoLocal(seguimientoSinProgramar);
+  if(firebaseListo){
+    firebaseDb.collection('nv_programadas').doc('seguimiento_sin_programar').set({
+      datos: seguimientoSinProgramar, updatedAt: ahoraISO, claveAdmin: FIREBASE_ADMIN_KEY
+    }).catch(err => console.warn('No se pudo sincronizar el seguimiento a la nube:', err));
+  }
+
+  if(superanUmbral.length){
+    const resumen = superanUmbral.slice(0,6).map(n => `NV ${n.nv} (${n.dias}d) — ${n.cliente} [${n.vendedor}]`).join('\n');
+    const extra = superanUmbral.length > 6 ? `\n...y ${superanUmbral.length-6} más` : '';
+    enviarNotificacionNtfy(
+      `⚠️ ${superanUmbral.length} NV llevan +${UMBRAL_DIAS_SIN_PROGRAMAR} días sin programar`,
+      resumen + extra,
+      'high'
+    );
+  }
+}
+
+function suscribirseASeguimiento(){
+  seguimientoSinProgramar = cargarSeguimientoLocal();
+  if(!firebaseListo) return;
+  if(firebaseUnsubSeguimiento) firebaseUnsubSeguimiento();
+  firebaseUnsubSeguimiento = firebaseDb.collection('nv_programadas').doc('seguimiento_sin_programar').onSnapshot(doc => {
+    if(doc.exists && doc.data().datos){
+      seguimientoSinProgramar = doc.data().datos;
+      guardarSeguimientoLocal(seguimientoSinProgramar);
+      if(RESULT) renderProgramaDespachoTabla();
+    }
+  }, err => console.warn('Error escuchando el seguimiento:', err));
+}
+
 function cargarRetencionMotivosLocal(){
   try{ const raw = localStorage.getItem(RETENCION_MOTIVOS_KEY); return raw ? JSON.parse(raw) : {}; }catch(e){ return {}; }
 }
@@ -776,7 +870,7 @@ function mostrarInfoProduccion(filename, savedAt){
   const el = document.getElementById('prodDatosInfo');
   const fecha = new Date(savedAt);
   el.innerHTML = `📌 Programa cargado: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')})` +
-    (sesion && sesion.role==='admin' ? ` <button class="btn btn-ghost" id="btnBorrarProduccion" style="padding:3px 10px; margin-left:8px;">Borrar</button>` : '');
+    (sesion && tienePermiso('accesoMaestro') ? ` <button class="btn btn-ghost" id="btnBorrarProduccion" style="padding:3px 10px; margin-left:8px;">Borrar</button>` : '');
   el.classList.remove('hidden');
   const btn = document.getElementById('btnBorrarProduccion');
   if(btn) btn.addEventListener('click', borrarProduccion);
@@ -904,11 +998,71 @@ const CODIGOS_EXCLUIDOS = ['999','9999999998'];
 /* ============================================================
    USUARIOS Y ROLES
    ============================================================ */
-const ROLES = ['admin','vendedor','gerencia_general','gerencia_comercial'];
-const ROLE_LABELS = {
-  admin:'Administrador', vendedor:'Vendedor',
-  gerencia_general:'Gerencia General', gerencia_comercial:'Gerencia Comercial'
-};
+const PERMISOS_DISPONIBLES = [
+  {key:'verAnalisis', label:'Ver pestaña Análisis'},
+  {key:'verDespacho', label:'Ver Programa de Despacho'},
+  {key:'verProduccion', label:'Ver Programa de Producción'},
+  {key:'verTodasNV', label:'Ver TODAS las NV en Despacho (no solo las propias)'},
+  {key:'cargarExcelNV', label:'Cargar el Excel de NV'},
+  {key:'cargarExcelProduccion', label:'Cargar el Excel de Producción'},
+  {key:'editarRetencion', label:'Editar motivo de retención'},
+  {key:'exportarExcel', label:'Exportar a Excel'},
+  {key:'accesoMaestro', label:'Acceso a Maestro'},
+];
+const ROLES_CONFIG_KEY = 'nvprog_roles_config_v1';
+function permisosVacios(){ const o={}; PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=false); return o; }
+function seedRolesConfig(){
+  return {
+    admin: {label:'Administrador', permisos: (()=>{const o=permisosVacios(); PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=true); return o;})()},
+    vendedor: {label:'Vendedor', permisos: {...permisosVacios(), verDespacho:true, verProduccion:true, exportarExcel:true}},
+    gerencia_general: {label:'Gerencia General', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true}},
+    gerencia_comercial: {label:'Gerencia Comercial', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true}},
+    solo_lectura: {label:'Solo Lectura', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, exportarExcel:true}},
+  };
+}
+function cargarRolesConfigLocal(){
+  try{ const raw = localStorage.getItem(ROLES_CONFIG_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
+}
+function guardarRolesConfigLocal(cfg){
+  try{ localStorage.setItem(ROLES_CONFIG_KEY, JSON.stringify(cfg)); }catch(e){}
+}
+let ROLES_CONFIG = cargarRolesConfigLocal() || seedRolesConfig();
+if(!cargarRolesConfigLocal()) guardarRolesConfigLocal(ROLES_CONFIG);
+let firebaseUnsubRoles = null;
+
+function tienePermiso(permiso){
+  if(!sesion) return false;
+  const cfg = ROLES_CONFIG[sesion.role];
+  if(!cfg) return false;
+  return !!cfg.permisos[permiso];
+}
+function etiquetaRol(role){
+  return (ROLES_CONFIG[role] && ROLES_CONFIG[role].label) || role;
+}
+
+function guardarRolesConfigEnNube(){
+  guardarRolesConfigLocal(ROLES_CONFIG);
+  if(!firebaseListo) return;
+  firebaseDb.collection('nv_programadas').doc('roles_config').set({
+    roles: ROLES_CONFIG, updatedAt: new Date().toISOString(),
+    updatedBy: sesion ? sesion.username : 'desconocido', claveAdmin: FIREBASE_ADMIN_KEY
+  }).catch(err => console.warn('No se pudo sincronizar roles a la nube:', err));
+}
+function suscribirseARolesConfig(){
+  if(!firebaseListo) return;
+  if(firebaseUnsubRoles) firebaseUnsubRoles();
+  firebaseUnsubRoles = firebaseDb.collection('nv_programadas').doc('roles_config').onSnapshot(doc => {
+    if(doc.exists && doc.data().roles){
+      ROLES_CONFIG = doc.data().roles;
+      guardarRolesConfigLocal(ROLES_CONFIG);
+      if(sesion){
+        renderTabsNav();
+        if(tienePermiso('accesoMaestro')) renderRolesConfigTable();
+        if(RESULT) render();
+      }
+    }
+  }, err => console.warn('Error escuchando roles_config:', err));
+}
 const USERS_KEY = 'nvprog_usuarios_v2'; // v2: usernames formato inicial+apellido (ej. cpalma)
 
 function normalizarUsername(v){
@@ -1463,7 +1617,6 @@ function procesarDatos(rows){
    ============================================================ */
 function render(){
   document.getElementById('app').classList.remove('hidden');
-  renderNvDiff();
   renderDashCards();
   renderGraficosDashboard();
   renderResumenSituacion();
@@ -1593,11 +1746,11 @@ function renderGraficosDashboard(){
   renderPieResumen('pieResumenA', 'pieResumenALegend', RESULT.resumenSituacionA);
   renderPieResumen('pieResumenP', 'pieResumenPLegend', RESULT.resumenSituacionP);
   renderPieMotivos('pieMotivosA', 'pieMotivosALegend', RESULT.resumenSituacionA, {
-    descargables: true,
+    descargables: tienePermiso('exportarExcel'),
     onDescargar: (motivo) => exportarMotivoExcel(RESULT.resumenSituacionA, motivo, 'Aprobadas')
   });
   renderPieMotivos('pieMotivosP', 'pieMotivosPLegend', RESULT.resumenSituacionP, {
-    descargables: true,
+    descargables: tienePermiso('exportarExcel'),
     onDescargar: (motivo) => exportarMotivoExcel(RESULT.resumenSituacionP, motivo, 'Pendientes')
   });
 }
@@ -1924,7 +2077,7 @@ function renderRetenidas(){
         <td><span class="badge ${r.tipo==='Retira Cliente'?'badge-retira':'badge-despacha'}">${esc(r.tipo)}</span></td>
         <td>${money(r.valorSaldo)}</td>
         <td>
-          <select data-nv="${esc(r.nv)}" class="retencionMotivoSelect" style="padding:4px 6px; border:1px solid var(--line); border-radius:4px; font-size:12px; min-width:220px;">
+          <select data-nv="${esc(r.nv)}" class="retencionMotivoSelect" ${!tienePermiso('editarRetencion') ? 'disabled' : ''} style="padding:4px 6px; border:1px solid var(--line); border-radius:4px; font-size:12px; min-width:220px;">
             <option value="">-- Seleccionar motivo --</option>
             ${RETENCION_MOTIVOS_OPCIONES.map(o=>`<option value="${esc(o)}" ${retencionMotivos[r.nv]===o?'selected':''}>${esc(o)}</option>`).join('')}
           </select>
@@ -1970,7 +2123,7 @@ function exportRetenidasExcel(){
 function poblarSelectUsuarios(){
   const sel = document.getElementById('loginUserSelect');
   sel.innerHTML = USERS.slice().sort((a,b)=>a.username.localeCompare(b.username))
-    .map(u=>`<option value="${esc(u.username)}">${esc(u.username)} (${esc(ROLE_LABELS[u.role]||u.role)})</option>`).join('');
+    .map(u=>`<option value="${esc(u.username)}">${esc(u.username)} (${esc(etiquetaRol(u.role))})</option>`).join('');
 }
 
 function intentarLogin(){
@@ -1996,6 +2149,8 @@ function logout(){
   if(firebaseUnsub){ firebaseUnsub(); firebaseUnsub = null; }
   if(firebaseUnsubProd){ firebaseUnsubProd(); firebaseUnsubProd = null; }
   if(firebaseUnsubRetenciones){ firebaseUnsubRetenciones(); firebaseUnsubRetenciones = null; }
+  if(firebaseUnsubSeguimiento){ firebaseUnsubSeguimiento(); firebaseUnsubSeguimiento = null; }
+  if(firebaseUnsubRoles){ firebaseUnsubRoles(); firebaseUnsubRoles = null; }
   document.getElementById('loginWrap').classList.remove('hidden');
   document.getElementById('mainWrap').classList.add('hidden');
   document.getElementById('sesionBar').classList.add('hidden');
@@ -2006,10 +2161,9 @@ function aplicarSesion(){
   document.getElementById('loginWrap').classList.add('hidden');
   document.getElementById('mainWrap').classList.remove('hidden');
   document.getElementById('sesionBar').classList.remove('hidden');
-  document.getElementById('sesionLabel').textContent = `${sesion.username} · ${ROLE_LABELS[sesion.role]||sesion.role}`;
+  document.getElementById('sesionLabel').textContent = `${sesion.username} · ${etiquetaRol(sesion.role)}`;
 
-  const esAdmin = sesion.role === 'admin';
-  document.getElementById('uploadbox').classList.toggle('hidden', !esAdmin);
+  document.getElementById('uploadbox').classList.toggle('hidden', !tienePermiso('cargarExcelNV'));
 
   // Mientras llega la respuesta de Firebase, se usa el cache local como respaldo inmediato
   if(!RESULT){
@@ -2023,7 +2177,7 @@ function aplicarSesion(){
       mostrarInfoDatosGuardados(guardado.filenameActual || '(archivo guardado)', guardado.savedAtActual);
     }
   }
-  document.getElementById('esperandoDatosVendedor').classList.toggle('hidden', !!RESULT || esAdmin);
+  document.getElementById('esperandoDatosVendedor').classList.toggle('hidden', !!RESULT || tienePermiso('cargarExcelNV'));
 
   suscribirseADatosNube();
 
@@ -2034,30 +2188,39 @@ function aplicarSesion(){
       aplicarDatosProduccion(guardadoProd);
     }
   }
-  document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || esAdmin);
+  document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || tienePermiso('cargarExcelProduccion'));
   suscribirseAProduccionNube();
   suscribirseARetencionMotivos();
+  suscribirseASeguimiento();
+  suscribirseARolesConfig();
 
   renderTabsNav();
-  if(sesion.role === 'admin') renderUsersTable();
+  if(tienePermiso('accesoMaestro')){ renderUsersTable(); renderRolesConfigTable(); }
   if(RESULT) render(); else renderProgramaDespacho();
   renderProduccion();
 }
 
 let tabActivo = null;
 function tabsDisponibles(){
-  const esAdmin = sesion.role === 'admin';
-  const esGerencia = sesion.role === 'gerencia_general' || sesion.role === 'gerencia_comercial';
   const tabs = [];
-  if(esAdmin || esGerencia) tabs.push({id:'tabAnalisis', label:'📊 Análisis'});
-  tabs.push({id:'tabDespacho', label:'📅 Programa de Despacho'});
-  tabs.push({id:'tabProduccion', label:'🏭 Programa de Producción'});
-  if(esAdmin) tabs.push({id:'tabMaestro', label:'🔧 Maestro'});
+  if(tienePermiso('verAnalisis')) tabs.push({id:'tabAnalisis', label:'📊 Análisis'});
+  if(tienePermiso('verDespacho')) tabs.push({id:'tabDespacho', label:'📅 Programa de Despacho'});
+  if(tienePermiso('verProduccion')) tabs.push({id:'tabProduccion', label:'🏭 Programa de Producción'});
+  if(tienePermiso('accesoMaestro')) tabs.push({id:'tabMaestro', label:'🔧 Maestro'});
   return tabs;
 }
 
 function renderTabsNav(){
+  const puedeExportar = tienePermiso('exportarExcel');
+  ['btnExportAll','btnExportRetenidas','pdExportBtn','prodExportBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('hidden', !puedeExportar);
+  });
   const tabs = tabsDisponibles();
+  if(!tabs.length){
+    document.getElementById('mainTabs').innerHTML = `<div style="padding:10px; color:var(--steel); font-size:13px;">Tu rol no tiene ninguna pestaña habilitada. Pide al Administrador que te asigne permisos en Maestro → Roles.</div>`;
+    return;
+  }
   if(!tabActivo || !tabs.some(t=>t.id===tabActivo)) tabActivo = tabs[0].id;
   document.getElementById('mainTabs').innerHTML = tabs.map(t => `
     <div class="tab ${t.id===tabActivo?'active':''}" data-tab="${t.id}">${t.label}</div>
@@ -2092,7 +2255,7 @@ function renderUsersTable(){
         <td>${esc(u.username)}</td>
         <td>
           <select data-i="${i}" class="userRoleSelect" style="padding:4px 6px; border:1px solid var(--line); border-radius:4px; font-size:12.5px;">
-            ${ROLES.map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${esc(ROLE_LABELS[r])}</option>`).join('')}
+            ${Object.keys(ROLES_CONFIG).map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${esc(etiquetaRol(r))}</option>`).join('')}
           </select>
         </td>
         <td>
@@ -2159,6 +2322,70 @@ function regenerarUsuariosVendedores(){
   alert('Usuarios vendedores regenerados/actualizados.');
 }
 
+function renderRolesConfigTable(){
+  const roles = Object.keys(ROLES_CONFIG).sort();
+  const headerPermisos = PERMISOS_DISPONIBLES.map(p=>`<th style="white-space:normal; min-width:90px; font-size:10.5px;">${esc(p.label)}</th>`).join('');
+  document.getElementById('rolesConfigTable').innerHTML = `
+    <thead><tr>
+      <th>Nombre visible</th><th>Clave</th>${headerPermisos}<th></th>
+    </tr></thead>
+    <tbody>
+      ${roles.map(r => {
+        const cfg = ROLES_CONFIG[r];
+        const permisosHtml = PERMISOS_DISPONIBLES.map(p => `
+          <td style="text-align:center;">
+            <input type="checkbox" class="rolPermisoCheck" data-rol="${esc(r)}" data-permiso="${p.key}" ${cfg.permisos[p.key]?'checked':''}>
+          </td>`).join('');
+        return `<tr>
+          <td><input type="text" class="rolLabelInput" data-rol="${esc(r)}" value="${esc(cfg.label)}" style="padding:4px 6px; border:1px solid var(--line); border-radius:4px; font-size:12.5px; width:150px;"></td>
+          <td style="font-family:monospace; font-size:11.5px; color:var(--steel);">${esc(r)}</td>
+          ${permisosHtml}
+          <td>${r!=='admin' ? `<button class="btn btn-ghost btnEliminarRol" data-rol="${esc(r)}" style="padding:4px 10px;">Eliminar</button>` : ''}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>`;
+
+  document.querySelectorAll('.rolPermisoCheck').forEach(chk => chk.addEventListener('change', e => {
+    const rol = e.target.getAttribute('data-rol'), permiso = e.target.getAttribute('data-permiso');
+    ROLES_CONFIG[rol].permisos[permiso] = e.target.checked;
+    guardarRolesConfigEnNube();
+    if(sesion && sesion.role === rol){
+      renderTabsNav();
+      if(RESULT) render();
+      renderProduccion();
+      renderProgramaDespacho();
+    }
+  }));
+  document.querySelectorAll('.rolLabelInput').forEach(inp => inp.addEventListener('change', e => {
+    const rol = e.target.getAttribute('data-rol');
+    ROLES_CONFIG[rol].label = e.target.value.trim() || rol;
+    guardarRolesConfigEnNube();
+    if(sesion && sesion.role === rol) document.getElementById('sesionLabel').textContent = `${sesion.username} · ${etiquetaRol(rol)}`;
+    poblarSelectUsuarios();
+    renderUsersTable();
+  }));
+  document.querySelectorAll('.btnEliminarRol').forEach(btn => btn.addEventListener('click', e => {
+    const rol = e.target.getAttribute('data-rol');
+    const enUso = USERS.some(u=>u.role===rol);
+    if(enUso){ alert('No se puede eliminar: hay usuarios con este rol. Cámbiales el rol primero en Gestión de Usuarios.'); return; }
+    if(!confirm(`¿Eliminar el rol "${ROLES_CONFIG[rol].label}"?`)) return;
+    delete ROLES_CONFIG[rol];
+    guardarRolesConfigEnNube();
+    renderRolesConfigTable();
+  }));
+}
+
+function nuevoRol(){
+  const label = prompt('Nombre visible del rol nuevo (ej. "Auditor"):');
+  if(!label) return;
+  let key = label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  if(!key) key = 'rol_'+Date.now();
+  if(ROLES_CONFIG[key]){ alert('Ya existe un rol con esa clave, prueba con otro nombre.'); return; }
+  ROLES_CONFIG[key] = {label: label.trim(), permisos: permisosVacios()};
+  guardarRolesConfigEnNube();
+  renderRolesConfigTable();
+}
+
 function nuevoUsuario(){
   const username = prompt('Nombre de usuario (sin espacios):');
   if(!username) return;
@@ -2202,7 +2429,7 @@ function renderProgramaDespacho(){
   if(!sesion || !RESULT) return;
   document.getElementById('progDespachoPanel').classList.remove('hidden');
 
-  const esVendedor = sesion.role === 'vendedor';
+  const esVendedor = !tienePermiso('verTodasNV');
   document.getElementById('pdSesionLabel').textContent = esVendedor ? ((sesion.vendedores&&sesion.vendedores.length) ? sesion.vendedores.join(', ') : '(sin vendedor vinculado)') : 'Vista completa';
 
   const filtroWrap = document.getElementById('pdVendorFilterWrap');
@@ -2240,10 +2467,11 @@ function esSemanaActual(fecha){
   const {lunes, domingo} = inicioSemanaActual();
   return fecha.getTime() >= lunes.getTime() && fecha.getTime() <= domingo.getTime();
 }
-function fprogCellHtml(fecha, motivo){
+function fprogCellHtml(fecha, motivo, dias){
   if(!fecha){
     const motivoTxt = motivo && motivo!=='0' ? ` — ${esc(motivo)}` : ' — sin motivo registrado';
-    return `<span class="pending-note" style="padding:2px 8px;">Sin programar${motivoTxt}</span>`;
+    const diasTxt = (dias && dias >= UMBRAL_DIAS_SIN_PROGRAMAR) ? ` <strong>🔴 ${Math.floor(dias)}d</strong>` : '';
+    return `<span class="pending-note" style="padding:2px 8px;">Sin programar${motivoTxt}${diasTxt}</span>`;
   }
   if(esSemanaActual(fecha)){
     return `<span class="badge badge-completo">${fmtFecha(fecha)}</span>`;
@@ -2252,7 +2480,7 @@ function fprogCellHtml(fecha, motivo){
 }
 
 function renderProgramaDespachoTabla(){
-  const esVendedor = sesion.role === 'vendedor';
+  const esVendedor = !tienePermiso('verTodasNV');
   let base;
   if(esVendedor){
     base = RESULT.programaDespacho.filter(r => (sesion.vendedores||[]).includes(r.vendedor));
@@ -2283,7 +2511,10 @@ function renderProgramaDespachoTabla(){
         <th>Saldo</th><th>Cantidad Programada (QPROG)</th><th>Fecha Programada (FPROG)</th>
       </tr></thead>
       <tbody>
-        ${rows.map(r=>`<tr ${r.retenida==='Si'?'style="background:#fff4e9;"':''}>
+        ${rows.map(r=>{
+          const dias = !r.fprogFecha ? diasSinProgramar(r.nv, r.codigo) : 0;
+          const alerta = dias >= UMBRAL_DIAS_SIN_PROGRAMAR;
+          return `<tr ${r.retenida==='Si'?'style="background:#fff4e9;"':(alerta?'style="background:#fbe6e3;"':'')}>
           <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span>${r.retenida==='Si'?'<span class="tag tag-retenida">RETENIDA</span>':''}</td>
           <td>${esc(r.oc||'')}</td>
           <td>${fmtFecha(r.fechaEmis)}</td>
@@ -2294,20 +2525,19 @@ function renderProgramaDespachoTabla(){
           <td>${esc(r.vendedor)}</td>
           <td>${num(r.saldo)}</td>
           <td>${num(r.qprog)}</td>
-          <td>${fprogCellHtml(r.fprogFecha, r.operacion)}</td>
-        </tr>`).join('')}
+          <td>${fprogCellHtml(r.fprogFecha, r.operacion, dias)}</td>
+        </tr>`;}).join('')}
       </tbody>`;
   }
-  document.getElementById('pdFootnote').textContent = `${rows.length} de ${base.length} líneas mostradas. Verde = programada para esta semana (lun-dom) · Naranjo = programada para otra semana · Rojo = sin programar (se indica el motivo si está registrado).`;
+  document.getElementById('pdFootnote').textContent = `${rows.length} de ${base.length} líneas mostradas. Verde = programada para esta semana (lun-dom) · Naranjo = programada para otra semana · Rojo = sin programar (se indica el motivo si está registrado) · Fondo rojo = lleva ${UMBRAL_DIAS_SIN_PROGRAMAR}+ días sin programar.`;
 }
 
 /* ============================================================
    Render — Programa de Producción
    ============================================================ */
 function renderProduccion(){
-  const esAdmin = sesion && sesion.role === 'admin';
-  document.getElementById('prodUploadWrap').classList.toggle('hidden', !esAdmin);
-  document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || esAdmin);
+  document.getElementById('prodUploadWrap').classList.toggle('hidden', !tienePermiso('cargarExcelProduccion'));
+  document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || tienePermiso('cargarExcelProduccion'));
   if(!RESULT_PROD) return;
   document.getElementById('prodPanel').classList.remove('hidden');
   renderProdCards();
@@ -2472,7 +2702,7 @@ function handleFileProd(file){
 
 function pdExportExcel(){
   if(!sesion || !RESULT) return;
-  const esVendedor = sesion.role === 'vendedor';
+  const esVendedor = !tienePermiso('verTodasNV');
   let base;
   if(esVendedor) base = RESULT.programaDespacho.filter(r => (sesion.vendedores||[]).includes(r.vendedor));
   else if(pdVendedorFiltro === '__TODOS__') base = RESULT.programaDespacho;
@@ -2504,6 +2734,7 @@ document.getElementById('loginPassToggle').addEventListener('click', () => {
 });
 document.getElementById('btnLogout').addEventListener('click', logout);
 document.getElementById('btnNuevoUsuario').addEventListener('click', nuevoUsuario);
+document.getElementById('btnNuevoRol').addEventListener('click', nuevoRol);
 document.getElementById('btnRegenerarVendedores').addEventListener('click', regenerarUsuariosVendedores);
 document.getElementById('btnExportUsers').addEventListener('click', exportarUsuarios);
 document.getElementById('btnImportUsers').addEventListener('click', () => document.getElementById('importUsersInput').click());
@@ -2681,7 +2912,7 @@ function mostrarInfoDatosGuardados(filename, savedAt){
   const el = document.getElementById('datosGuardadosInfo');
   const fecha = new Date(savedAt);
   el.innerHTML = `📌 Datos cargados: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')}) — se mantienen hasta que cargues un archivo nuevo.` +
-    (sesion && sesion.role==='admin' ?
+    (sesion && tienePermiso('accesoMaestro') ?
       ` <button class="btn btn-ghost" id="btnExportarDatos" style="padding:3px 10px; margin-left:8px;">⬇ Exportar datos (respaldo)</button>` +
       ` <button class="btn btn-ghost" id="btnImportarDatos" style="padding:3px 10px; margin-left:4px;">⬆ Importar datos</button>` +
       ` <button class="btn btn-ghost" id="btnBorrarDatos" style="padding:3px 10px; margin-left:4px;">Borrar</button>`
@@ -2790,6 +3021,7 @@ function handleFile(file){
     });
     mostrarInfoDatosGuardados(file.name, NV_ROWS_ACTUAL_RAW.savedAt);
     guardarDatosEnNube(rowsNuevo, file.name); // sincroniza para todos los usuarios (desplaza actual->anterior en la nube también)
+    actualizarSeguimientoSinProgramar(); // revisa NV que llevan +3 días sin programar y avisa por ntfy si corresponde
     currentVendor = null;
     currentTipo = 'Retira Cliente';
     render();
@@ -2821,9 +3053,6 @@ document.getElementById('prodLimpiarFechas').addEventListener('click', () => {
 });
 document.getElementById('btnCerrarDiff').addEventListener('click', () => {
   document.getElementById('prodDiffPanel').classList.add('hidden');
-});
-document.getElementById('btnCerrarNvDiff').addEventListener('click', () => {
-  document.getElementById('nvDiffPanel').classList.add('hidden');
 });
 document.getElementById('btnVerDesgloseDiferenciaA').addEventListener('click', () => {
   abrirModalDiferencia('Aprobadas (A)', RESULT.resumenSituacionA);
