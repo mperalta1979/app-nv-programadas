@@ -303,14 +303,31 @@
     <div class="cards" id="dashCards"></div>
 
     <div class="panel">
-      <div class="panel-head"><h2>Gráfico — Dashboard General</h2></div>
+      <div class="panel-head"><h2>Gráficos — Resumen Situación (por valor $)</h2></div>
       <div class="panel-body pad">
-        <div style="display:flex; gap:14px; font-size:11.5px; margin-bottom:10px; color:var(--steel);">
-          <span><span style="display:inline-block; width:10px; height:10px; background:#2e75b6; border-radius:2px; margin-right:4px;"></span>Retira Cliente</span>
-          <span><span style="display:inline-block; width:10px; height:10px; background:#6a3fa0; border-radius:2px; margin-right:4px;"></span>Por Despachar</span>
+        <div style="display:flex; flex-wrap:wrap; gap:24px; justify-content:center;">
+          <div style="flex:1; min-width:280px; max-width:420px;">
+            <div style="text-align:center; font-weight:700; font-size:13px; color:var(--navy-deep); margin-bottom:8px;">Resumen — Aprobadas (A)</div>
+            <svg id="pieResumenA" viewBox="0 0 260 260" style="width:100%; max-width:260px; display:block; margin:0 auto;"></svg>
+            <div id="pieResumenALegend" style="font-size:11.5px; margin-top:10px;"></div>
+          </div>
+          <div style="flex:1; min-width:280px; max-width:420px;">
+            <div style="text-align:center; font-weight:700; font-size:13px; color:var(--navy-deep); margin-bottom:8px;">Resumen — Pendientes (P)</div>
+            <svg id="pieResumenP" viewBox="0 0 260 260" style="width:100%; max-width:260px; display:block; margin:0 auto;"></svg>
+            <div id="pieResumenPLegend" style="font-size:11.5px; margin-top:10px;"></div>
+          </div>
         </div>
-        <div style="overflow-x:auto;">
-          <svg id="dashChartSvg" width="100%" style="min-width:640px; display:block;"></svg>
+        <div style="display:flex; flex-wrap:wrap; gap:24px; justify-content:center; margin-top:28px; padding-top:24px; border-top:1px solid var(--line);">
+          <div style="flex:1; min-width:280px; max-width:420px;">
+            <div style="text-align:center; font-weight:700; font-size:13px; color:var(--navy-deep); margin-bottom:8px;">Motivos Diferencia — Aprobadas (A)</div>
+            <svg id="pieMotivosA" viewBox="0 0 260 260" style="width:100%; max-width:260px; display:block; margin:0 auto;"></svg>
+            <div id="pieMotivosALegend" style="font-size:11.5px; margin-top:10px;"></div>
+          </div>
+          <div style="flex:1; min-width:280px; max-width:420px;">
+            <div style="text-align:center; font-weight:700; font-size:13px; color:var(--navy-deep); margin-bottom:8px;">Motivos Diferencia — Pendientes (P)</div>
+            <svg id="pieMotivosP" viewBox="0 0 260 260" style="width:100%; max-width:260px; display:block; margin:0 auto;"></svg>
+            <div id="pieMotivosPLegend" style="font-size:11.5px; margin-top:10px;"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1405,7 +1422,7 @@ function render(){
   document.getElementById('app').classList.remove('hidden');
   renderNvDiff();
   renderDashCards();
-  renderDashChart();
+  renderGraficosDashboard();
   renderResumenSituacion();
   renderDashVendorTable();
   renderDashOperacionTable();
@@ -1449,48 +1466,66 @@ function renderDashCards(){
   `).join('');
 }
 
-function renderDashChart(){
-  const d = RESULT.dashboard;
-  const NAVY = '#1F4E78', GREEN = '#1e8e5a', YELLOW = '#a9720a', RED = '#b3352b';
-  const RETIRA = '#2e75b6', DESPACHO = '#6a3fa0';
-  const datos = [
-    {label:'Aprobadas', cantidad: d.aprobadas, valor: d.aprobadasValor, color: NAVY},
-    {label:'Pendientes', cantidad: d.pendientes, valor: d.pendientesValor, color: YELLOW},
-    {label:'Programadas', cantidad: d.programadas, valor: d.programadasValor, color: GREEN},
-    {label:'Prog. Parcial', cantidad: d.progParcial, valor: d.progParcialValor, color: YELLOW},
-    {label:'No prog. — Retira Cliente', cantidad: d.noProgRetira, valor: d.noProgRetiraValor, color: RETIRA},
-    {label:'No prog. — Por Despachar', cantidad: d.noProgDespacho, valor: d.noProgDespachoValor, color: DESPACHO},
-    {label:'Sin stock — Retira Cliente', cantidad: d.sinStockRetira, valor: d.sinStockRetiraValor, color: RETIRA},
-    {label:'Sin stock — Por Despachar', cantidad: d.sinStockDespacho, valor: d.sinStockDespachoValor, color: DESPACHO},
-    {label:'Otros mot. — Retira Cliente', cantidad: d.otrosMotivosRetira, valor: d.otrosMotivosRetiraValor, color: RETIRA},
-    {label:'Otros mot. — Por Despachar', cantidad: d.otrosMotivosDespacho, valor: d.otrosMotivosDespachoValor, color: DESPACHO},
-    {label:'Retira Cliente (total)', cantidad: d.retiraCliente, valor: d.retiraClienteValor, color: RETIRA},
-    {label:'Por Despachar (total)', cantidad: d.porDespachar, valor: d.porDespacharValor, color: DESPACHO},
-    {label:'Retenidas — Retira Cliente', cantidad: d.retenidasRetira, valor: d.retenidasRetiraValor, color: RETIRA},
-    {label:'Retenidas — Por Despachar', cantidad: d.retenidasDespacho, valor: d.retenidasDespachoValor, color: DESPACHO},
-    {label:'Bloqueadas', cantidad: d.bloqueadas, valor: d.bloqueadasValor, color: RED},
-  ];
+function renderPieChart(svgId, legendId, data){
+  // data: [{label, valor, color}]
+  const svg = document.getElementById(svgId);
+  const legendEl = document.getElementById(legendId);
+  const total = data.reduce((s,d)=>s+d.valor, 0);
+  const cx=130, cy=130, r=110;
 
-  const svg = document.getElementById('dashChartSvg');
-  const W = 940, rowH = 30, padTop = 10, padLeft = 190, padRight = 190;
-  const H = padTop + datos.length*rowH + 10;
-  const maxCant = Math.max(1, ...datos.map(x=>x.cantidad));
-  const barMaxW = W - padLeft - padRight;
+  if(!total){
+    svg.innerHTML = `<text x="130" y="130" text-anchor="middle" font-size="12" fill="#4a6f8a" font-family="Segoe UI, Arial">Sin datos</text>`;
+    legendEl.innerHTML = '';
+    return;
+  }
 
+  let anguloAcum = -Math.PI/2; // empieza arriba
   let svgContent = '';
-  datos.forEach((x, i) => {
-    const y = padTop + i*rowH;
-    const barW = (x.cantidad / maxCant) * barMaxW;
-    svgContent += `
-      <text x="${padLeft-10}" y="${y+rowH/2+4}" text-anchor="end" font-size="11.5" font-family="Segoe UI, Arial" fill="#1c2b36">${esc(x.label)}</text>
-      <rect x="${padLeft}" y="${y+4}" width="${Math.max(barW,2)}" height="${rowH-12}" rx="3" fill="${x.color}"></rect>
-      <text x="${padLeft+barW+8}" y="${y+rowH/2+4}" font-size="12" font-family="Segoe UI, Arial" fill="#1c2b36" font-weight="700">${x.cantidad}</text>
-      <text x="${padLeft+barW+8+String(x.cantidad).length*8+6}" y="${y+rowH/2+4}" font-size="11" font-family="Segoe UI, Arial" fill="#4a6f8a">(${money(x.valor)})</text>
-    `;
+  data.forEach(d => {
+    if(d.valor <= 0) return;
+    const frac = d.valor / total;
+    const angulo = frac * 2 * Math.PI;
+    const x1 = cx + r*Math.cos(anguloAcum), y1 = cy + r*Math.sin(anguloAcum);
+    const anguloFin = anguloAcum + angulo;
+    const x2 = cx + r*Math.cos(anguloFin), y2 = cy + r*Math.sin(anguloFin);
+    const largeArc = angulo > Math.PI ? 1 : 0;
+    svgContent += `<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${largeArc} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${d.color}" stroke="#fff" stroke-width="1.5"><title>${esc(d.label)}: ${money(d.valor)} (${(frac*100).toFixed(1)}%)</title></path>`;
+    anguloAcum = anguloFin;
   });
-
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.innerHTML = svgContent;
+
+  legendEl.innerHTML = data.filter(d=>d.valor>0).map(d => `
+    <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+      <span style="display:inline-block; width:10px; height:10px; border-radius:2px; background:${d.color}; flex-shrink:0;"></span>
+      <span style="flex:1;">${esc(d.label)}</span>
+      <span style="font-weight:700; white-space:nowrap;">${money(d.valor)}</span>
+      <span style="color:var(--steel); white-space:nowrap;">(${(d.valor/total*100).toFixed(1)}%)</span>
+    </div>
+  `).join('');
+}
+
+const PALETA_MOTIVOS = ['#1F4E78','#2e75b6','#6a3fa0','#1e8e5a','#a9720a','#c1620a','#b3352b','#0b7285','#7048e8','#087f5b','#e8590c','#495057'];
+
+function renderPieResumen(svgId, legendId, r){
+  const RED = '#b3352b', RETIRA = '#2e75b6', GREEN = '#1e8e5a', NARANJO = '#c1620a';
+  renderPieChart(svgId, legendId, [
+    {label:'Retenidas', valor: r.retenidas.valor, color: RED},
+    {label:'Retira Cliente No Retenidas', valor: r.retiraNoRetenida.valor, color: RETIRA},
+    {label:'Programadas (Por Despachar)', valor: r.programadas.valor, color: GREEN},
+    {label:'Diferencia (Por Despachar sin programar)', valor: r.diferencia.valor, color: NARANJO},
+  ]);
+}
+
+function renderPieMotivos(svgId, legendId, r){
+  const datos = r.diferenciaPorMotivo.map((m,i) => ({label: m.motivo, valor: m.valor, color: PALETA_MOTIVOS[i % PALETA_MOTIVOS.length]}));
+  renderPieChart(svgId, legendId, datos);
+}
+
+function renderGraficosDashboard(){
+  renderPieResumen('pieResumenA', 'pieResumenALegend', RESULT.resumenSituacionA);
+  renderPieResumen('pieResumenP', 'pieResumenPLegend', RESULT.resumenSituacionP);
+  renderPieMotivos('pieMotivosA', 'pieMotivosALegend', RESULT.resumenSituacionA);
+  renderPieMotivos('pieMotivosP', 'pieMotivosPLegend', RESULT.resumenSituacionP);
 }
 
 function renderResumenSituacionBox(tablaId, r){
