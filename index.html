@@ -316,12 +316,22 @@
     </div>
 
     <div class="panel">
-      <div class="panel-head"><h2>Resumen Situación Notas de Venta</h2></div>
+      <div class="panel-head"><h2>Resumen Situación Notas de Venta — Aprobadas (A)</h2></div>
       <div class="panel-body pad">
         <div class="tablewrap">
-          <table id="resumenSituacionTable"></table>
+          <table id="resumenSituacionTableA"></table>
         </div>
-        <button class="btn btn-ghost" id="btnVerDesgloseDiferencia" style="margin-top:12px;">🔍 Ver detalle de la Diferencia (motivos y NV)</button>
+        <button class="btn btn-ghost" id="btnVerDesgloseDiferenciaA" style="margin-top:12px;">🔍 Ver detalle de la Diferencia (motivos y NV)</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Resumen Situación Notas de Venta — Pendientes (P)</h2></div>
+      <div class="panel-body pad">
+        <div class="tablewrap">
+          <table id="resumenSituacionTableP"></table>
+        </div>
+        <button class="btn btn-ghost" id="btnVerDesgloseDiferenciaP" style="margin-top:12px;">🔍 Ver detalle de la Diferencia (motivos y NV)</button>
       </div>
     </div>
 
@@ -419,7 +429,7 @@
   <div id="modalDesgloseDiferencia" class="modal-overlay hidden">
     <div class="modal-box">
       <div class="modal-head">
-        <h2>Detalle de la Diferencia (NV sin programar, Por Despachar)</h2>
+        <h2 id="modalDiferenciaTitulo">Detalle de la Diferencia (NV sin programar, Por Despachar)</h2>
         <button class="modal-close" id="btnCerrarModalDiferencia">×</button>
       </div>
       <div class="modal-body">
@@ -1085,38 +1095,52 @@ function procesarDatos(rows){
 
   const noProgramadasNV = nvList.filter(n=>n.estadoProg==='No programada');
 
-  /* -------- Resumen Situación Notas de Venta (recuadro solicitado) -------- */
+  /* -------- Resumen Situación Notas de Venta, separado por Estado (A/P) -------- */
   const sumValorNv = arr => arr.reduce((s,n)=>s+n.valorSaldo,0);
-  const resNvTotal = nvList;
-  const resRetenidas = nvList.filter(n=>n.retenida==='Si');
-  const resProgramables = nvList.filter(n=>n.retenida!=='Si');
-  const resRetiraNoRetenida = nvList.filter(n=>n.retira==='Si' && n.retenida!=='Si');
-  const resDespacharNoRetenida = nvList.filter(n=>n.despachar==='Si' && n.retenida!=='Si');
-  const resProgramadas = resDespacharNoRetenida.filter(n=>n.estadoProg!=='No programada'); // total o parcialmente
-  const resDiferencia = resDespacharNoRetenida.filter(n=>n.estadoProg==='No programada');
 
-  const motivoGroupMap = {};
-  resDiferencia.forEach(n => {
-    const key = n.motivo || '(Sin motivo / OPERACIÓN vacía)';
-    if(!motivoGroupMap[key]) motivoGroupMap[key] = {motivo:key, cantidad:0, valor:0};
-    motivoGroupMap[key].cantidad++;
-    motivoGroupMap[key].valor += n.valorSaldo;
-  });
-  const resDiferenciaPorMotivo = Object.values(motivoGroupMap).sort((a,b)=>b.valor-a.valor);
+  function construirResumenSituacion(nvSubconjunto){
+    const resNvTotal = nvSubconjunto;
+    const resRetenidas = nvSubconjunto.filter(n=>n.retenida==='Si');
+    const resProgramables = nvSubconjunto.filter(n=>n.retenida!=='Si');
+    const resRetiraNoRetenida = nvSubconjunto.filter(n=>n.retira==='Si' && n.retenida!=='Si');
+    const resDespacharNoRetenida = nvSubconjunto.filter(n=>n.despachar==='Si' && n.retenida!=='Si');
+    const resProgramadas = resDespacharNoRetenida.filter(n=>n.estadoProg!=='No programada'); // total o parcialmente
+    const resDiferencia = resDespacharNoRetenida.filter(n=>n.estadoProg==='No programada');
 
-  const resSinMotivoDetalle = resDiferencia.filter(n=>!n.motivo).sort((a,b)=>b.valorSaldo-a.valorSaldo);
+    const motivoGroupMap = {};
+    resDiferencia.forEach(n => {
+      const key = n.motivo || '(Sin motivo / OPERACIÓN vacía)';
+      if(!motivoGroupMap[key]) motivoGroupMap[key] = {motivo:key, cantidad:0, valor:0};
+      motivoGroupMap[key].cantidad++;
+      motivoGroupMap[key].valor += n.valorSaldo;
+    });
+    const resDiferenciaPorMotivo = Object.values(motivoGroupMap).sort((a,b)=>b.valor-a.valor);
 
-  const resumenSituacion = {
-    total: {cantidad: resNvTotal.length, valor: sumValorNv(resNvTotal)},
-    retenidas: {cantidad: resRetenidas.length, valor: sumValorNv(resRetenidas)},
-    programables: {cantidad: resProgramables.length, valor: sumValorNv(resProgramables)},
-    retiraNoRetenida: {cantidad: resRetiraNoRetenida.length, valor: sumValorNv(resRetiraNoRetenida)},
-    despacharProgramable: {cantidad: resDespacharNoRetenida.length, valor: sumValorNv(resDespacharNoRetenida)},
-    programadas: {cantidad: resProgramadas.length, valor: sumValorNv(resProgramadas)},
-    diferencia: {cantidad: resDiferencia.length, valor: sumValorNv(resDiferencia)},
-    diferenciaPorMotivo: resDiferenciaPorMotivo,
-    sinMotivoDetalle: resSinMotivoDetalle
-  };
+    // Sin motivo registrado: se excluyen las NV con valorización $0 (no representan saldo real pendiente),
+    // y se ordenan de la fecha más antigua a la más nueva.
+    const resSinMotivoDetalle = resDiferencia
+      .filter(n=>!n.motivo && n.valorSaldo > 0)
+      .sort((a,b)=>{
+        const fa = a.fecha ? a.fecha.getTime() : Infinity;
+        const fb = b.fecha ? b.fecha.getTime() : Infinity;
+        return fa - fb;
+      });
+
+    return {
+      total: {cantidad: resNvTotal.length, valor: sumValorNv(resNvTotal)},
+      retenidas: {cantidad: resRetenidas.length, valor: sumValorNv(resRetenidas)},
+      programables: {cantidad: resProgramables.length, valor: sumValorNv(resProgramables)},
+      retiraNoRetenida: {cantidad: resRetiraNoRetenida.length, valor: sumValorNv(resRetiraNoRetenida)},
+      despacharProgramable: {cantidad: resDespacharNoRetenida.length, valor: sumValorNv(resDespacharNoRetenida)},
+      programadas: {cantidad: resProgramadas.length, valor: sumValorNv(resProgramadas)},
+      diferencia: {cantidad: resDiferencia.length, valor: sumValorNv(resDiferencia)},
+      diferenciaPorMotivo: resDiferenciaPorMotivo,
+      sinMotivoDetalle: resSinMotivoDetalle
+    };
+  }
+
+  const resumenSituacionA = construirResumenSituacion(nvList.filter(n=>n.nvEstado==='A'));
+  const resumenSituacionP = construirResumenSituacion(nvList.filter(n=>n.nvEstado==='P'));
 
   const sumValor = arr => arr.reduce((s,n)=>s+n.valorSaldo,0);
 
@@ -1371,7 +1395,7 @@ function procesarDatos(rows){
     }
   });
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacion };
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP };
 }
 
 /* ============================================================
@@ -1469,8 +1493,7 @@ function renderDashChart(){
   svg.innerHTML = svgContent;
 }
 
-function renderResumenSituacion(){
-  const r = RESULT.resumenSituacion;
+function renderResumenSituacionBox(tablaId, r){
   const filas = [
     {label:'Total NV', op:'', ...r.total, bold:true},
     {label:'Total NV Retenidas', op:'Menos', ...r.retenidas},
@@ -1480,7 +1503,7 @@ function renderResumenSituacion(){
     {label:'Total NV Programadas (total o parcial)', op:'Menos', ...r.programadas},
     {label:'Diferencia (NV sin programar)', op:'=', ...r.diferencia, bold:true, destacar:true},
   ];
-  document.getElementById('resumenSituacionTable').innerHTML = `
+  document.getElementById(tablaId).innerHTML = `
     <thead><tr><th>Concepto</th><th></th><th>Cantidad NV</th><th>Valor</th></tr></thead>
     <tbody>
       ${filas.map(f=>`<tr ${f.destacar?'style="background:var(--red-bg);"':''}>
@@ -1490,6 +1513,10 @@ function renderResumenSituacion(){
         <td style="${f.bold?'font-weight:800;':''} ${f.destacar?'color:var(--red);':''}">${money(f.valor)}</td>
       </tr>`).join('')}
     </tbody>`;
+}
+
+function abrirModalDiferencia(estadoLabel, r){
+  document.getElementById('modalDiferenciaTitulo').textContent = `Detalle de la Diferencia — ${estadoLabel} (NV sin programar, Por Despachar)`;
 
   const rows = r.diferenciaPorMotivo;
   const totCant = rows.reduce((s,x)=>s+x.cantidad,0), totVal = rows.reduce((s,x)=>s+x.valor,0);
@@ -1513,7 +1540,14 @@ function renderResumenSituacion(){
         </tr>`).join('')}
       </tbody>`;
   }
-  document.getElementById('sinMotivoFootnote').textContent = `${sinMotivo.length} NV sin motivo registrado · ${money(sinMotivo.reduce((s,n)=>s+n.valorSaldo,0))}`;
+  document.getElementById('sinMotivoFootnote').textContent = `${sinMotivo.length} NV sin motivo registrado (con valorización real) · ${money(sinMotivo.reduce((s,n)=>s+n.valorSaldo,0))}`;
+
+  document.getElementById('modalDesgloseDiferencia').classList.remove('hidden');
+}
+
+function renderResumenSituacion(){
+  renderResumenSituacionBox('resumenSituacionTableA', RESULT.resumenSituacionA);
+  renderResumenSituacionBox('resumenSituacionTableP', RESULT.resumenSituacionP);
 }
 
 function renderDashVendorTable(){
@@ -2654,8 +2688,11 @@ document.getElementById('btnCerrarDiff').addEventListener('click', () => {
 document.getElementById('btnCerrarNvDiff').addEventListener('click', () => {
   document.getElementById('nvDiffPanel').classList.add('hidden');
 });
-document.getElementById('btnVerDesgloseDiferencia').addEventListener('click', () => {
-  document.getElementById('modalDesgloseDiferencia').classList.remove('hidden');
+document.getElementById('btnVerDesgloseDiferenciaA').addEventListener('click', () => {
+  abrirModalDiferencia('Aprobadas (A)', RESULT.resumenSituacionA);
+});
+document.getElementById('btnVerDesgloseDiferenciaP').addEventListener('click', () => {
+  abrirModalDiferencia('Pendientes (P)', RESULT.resumenSituacionP);
 });
 document.getElementById('btnCerrarModalDiferencia').addEventListener('click', () => {
   document.getElementById('modalDesgloseDiferencia').classList.add('hidden');
