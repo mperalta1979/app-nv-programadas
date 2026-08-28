@@ -1232,7 +1232,7 @@ function procesarDatos(rows){
     .map(r => ({
       nv: r.nv, nvEstado: r.nvEstado, fechaEmis: r.fecha_dt, oc: r.oc,
       codigo: r.codigo, producto: r.producto, um: r.um, cliente: r.cliente,
-      vendedor: r.vendedor, saldo: r.saldo, qprog: r.qprog, fprogFecha: r.fprogFecha
+      vendedor: r.vendedor, saldo: r.saldo, qprog: r.qprog, fprogFecha: r.fprogFecha, operacion: r.operacion
     }))
     .sort((a,b)=>{
       const fa = a.fprogFecha ? a.fprogFecha.getTime() : Infinity;
@@ -2115,8 +2115,11 @@ function esSemanaActual(fecha){
   const {lunes, domingo} = inicioSemanaActual();
   return fecha.getTime() >= lunes.getTime() && fecha.getTime() <= domingo.getTime();
 }
-function fprogCellHtml(fecha){
-  if(!fecha) return '<span class="pending-note" style="padding:2px 8px;">Sin programar</span>';
+function fprogCellHtml(fecha, motivo){
+  if(!fecha){
+    const motivoTxt = motivo && motivo!=='0' ? ` — ${esc(motivo)}` : ' — sin motivo registrado';
+    return `<span class="pending-note" style="padding:2px 8px;">Sin programar${motivoTxt}</span>`;
+  }
   if(esSemanaActual(fecha)){
     return `<span class="badge badge-completo">${fmtFecha(fecha)}</span>`;
   }
@@ -2166,11 +2169,11 @@ function renderProgramaDespachoTabla(){
           <td>${esc(r.vendedor)}</td>
           <td>${num(r.saldo)}</td>
           <td>${num(r.qprog)}</td>
-          <td>${fprogCellHtml(r.fprogFecha)}</td>
+          <td>${fprogCellHtml(r.fprogFecha, r.operacion)}</td>
         </tr>`).join('')}
       </tbody>`;
   }
-  document.getElementById('pdFootnote').textContent = `${rows.length} de ${base.length} líneas mostradas. Verde = programada para esta semana (lun-dom) · Naranjo = programada para otra semana · Rojo = sin programar.`;
+  document.getElementById('pdFootnote').textContent = `${rows.length} de ${base.length} líneas mostradas. Verde = programada para esta semana (lun-dom) · Naranjo = programada para otra semana · Rojo = sin programar (se indica el motivo si está registrado).`;
 }
 
 /* ============================================================
@@ -2358,7 +2361,8 @@ function pdExportExcel(){
     'NV': r.nv, 'Estado NV': r.nvEstado, 'OC': r.oc||'', 'Fecha Emision': fmtFecha(r.fechaEmis),
     'Codigo': r.codigo, 'Descripcion': r.producto, 'UM': r.um||'', 'Cliente': r.cliente||'',
     'Vendedor': r.vendedor, 'Saldo': r.saldo, 'Cantidad Programada (QPROG)': r.qprog,
-    'Fecha Programada (FPROG)': r.fprogFecha ? fmtFecha(r.fprogFecha) : 'Sin programar'
+    'Fecha Programada (FPROG)': r.fprogFecha ? fmtFecha(r.fprogFecha) : 'Sin programar',
+    'Motivo (si no está programada)': (!r.fprogFecha) ? (r.operacion && r.operacion!=='0' ? r.operacion : 'Sin motivo registrado') : ''
   })));
   XLSX.utils.book_append_sheet(wb, ws, 'Programa Despacho');
   const nombre = esVendedor ? (sesion.vendedores.join('_')||sesion.username).replace(/[^a-zA-Z0-9_]/g,'_') : (pdVendedorFiltro==='__TODOS__'?'TODOS':pdVendedorFiltro.replace(/[^a-zA-Z0-9]/g,'_'));
