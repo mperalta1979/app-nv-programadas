@@ -190,6 +190,25 @@
 
   .empty{padding:34px 16px; text-align:center; color:var(--steel); font-size:13.5px;}
 
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(11,39,64,.55);
+    display:flex; align-items:flex-start; justify-content:center;
+    padding:30px 16px; z-index:1000; overflow-y:auto;
+  }
+  .modal-box{
+    background:#fff; border-radius:12px; max-width:900px; width:100%;
+    box-shadow:0 20px 50px rgba(0,0,0,.25);
+  }
+  .modal-head{
+    padding:16px 20px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; background:#fff; border-radius:12px 12px 0 0;
+  }
+  .modal-head h2{margin:0; font-size:16px; color:var(--navy-deep);}
+  .modal-close{background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:var(--steel); padding:2px 8px;}
+  .modal-close:hover{color:var(--red);}
+  .modal-body{padding:18px 20px;}
+
   @media (max-width:640px){
     thead th, tbody td{padding:7px 8px;}
     .wrap{padding:16px 12px 40px;}
@@ -297,6 +316,16 @@
     </div>
 
     <div class="panel">
+      <div class="panel-head"><h2>Resumen Situación Notas de Venta</h2></div>
+      <div class="panel-body pad">
+        <div class="tablewrap">
+          <table id="resumenSituacionTable"></table>
+        </div>
+        <button class="btn btn-ghost" id="btnVerDesgloseDiferencia" style="margin-top:12px;">🔍 Ver detalle de la Diferencia (motivos y NV)</button>
+      </div>
+    </div>
+
+    <div class="panel">
       <div class="panel-head"><h2>Dashboard por vendedor</h2></div>
       <div class="panel-body">
         <div class="tablewrap">
@@ -385,6 +414,26 @@
       </div>
     </div>
 
+  </div>
+
+  <div id="modalDesgloseDiferencia" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2>Detalle de la Diferencia (NV sin programar, Por Despachar)</h2>
+        <button class="modal-close" id="btnCerrarModalDiferencia">×</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-weight:700; margin-bottom:6px;">Motivos (columna OPERACIÓN)</div>
+        <div class="tablewrap" style="max-height:260px; margin-bottom:20px;">
+          <table id="motivosDiferenciaTable"></table>
+        </div>
+        <div style="font-weight:700; margin-bottom:6px;">NV sin motivo registrado</div>
+        <div class="tablewrap" style="max-height:320px;">
+          <table id="sinMotivoTable"></table>
+        </div>
+        <div class="footer-note" id="sinMotivoFootnote"></div>
+      </div>
+    </div>
   </div>
 
   <div id="tabDespacho" class="hidden">
@@ -958,6 +1007,21 @@ function procesarProduccion(aoa){
   return { lotes, maquinas, productos };
 }
 
+/* Estandarización de motivos de la columna OPERACIÓN (corrige errores de tipeo del sistema origen) */
+const CORRECCIONES_OPERACION = {
+  'SOLITA VENDEDORA': 'SOLICITA VENDEDORA',
+  'AVISA CLUIENTE': 'AVISA CLIENTE',
+  'CLINTE AVISA DESP.': 'AVISA CLIENTE',
+  'PRODUC. FUTURA': 'PRODUCC.FUTURA',
+  'PRODUCC. FUTURA': 'PRODUCC.FUTURA',
+  'VENDEDORA AVISA DESPACHO': 'SOLICITA VENDEDORA',
+};
+function normalizarOperacion(v){
+  if(v===null || v===undefined) return v;
+  const s = String(v).trim();
+  return CORRECCIONES_OPERACION[s] || s;
+}
+
 function procesarDatos(rows){
   const clean = rows.map(r => ({
     fecha_emis: r['fecha_emis'],
@@ -978,7 +1042,7 @@ function procesarDatos(rows){
     fprog: Number(r['FPROG'])||0,
     fprogFecha: excelSerialToDate(r['FPROG']),
     programada: excelSerialToDate(r['FPROG']) !== null,
-    operacion: r['OPERACIÓN'],
+    operacion: normalizarOperacion(r['OPERACIÓN']),
     stock2: (r['Stock_2']===undefined || r['Stock_2']===null || r['Stock_2']==='') ? null : Number(r['Stock_2']),
     retira: (r['Retira']||'').toString().trim(),
     despachar: (r['Despachar']||'').toString().trim(),
@@ -999,7 +1063,7 @@ function procesarDatos(rows){
   vigentes.forEach(r => {
     if(!nvMap[r.nv]){
       nvMap[r.nv] = {
-        nv:r.nv, nvEstado:r.nvEstado, vendedor:r.vendedor, cliente:r.cliente,
+        nv:r.nv, nvEstado:r.nvEstado, vendedor:r.vendedor, cliente:r.cliente, fecha:r.fecha_dt,
         bloqueado:r.bloqueado, retenida:r.retenida, retira:r.retira, despachar:r.despachar,
         lineasTotal:0, lineasProgramadas:0, motivos:new Set(), valorSaldo:0
       };
@@ -1020,6 +1084,39 @@ function procesarDatos(rows){
   });
 
   const noProgramadasNV = nvList.filter(n=>n.estadoProg==='No programada');
+
+  /* -------- Resumen Situación Notas de Venta (recuadro solicitado) -------- */
+  const sumValorNv = arr => arr.reduce((s,n)=>s+n.valorSaldo,0);
+  const resNvTotal = nvList;
+  const resRetenidas = nvList.filter(n=>n.retenida==='Si');
+  const resProgramables = nvList.filter(n=>n.retenida!=='Si');
+  const resRetiraNoRetenida = nvList.filter(n=>n.retira==='Si' && n.retenida!=='Si');
+  const resDespacharNoRetenida = nvList.filter(n=>n.despachar==='Si' && n.retenida!=='Si');
+  const resProgramadas = resDespacharNoRetenida.filter(n=>n.estadoProg!=='No programada'); // total o parcialmente
+  const resDiferencia = resDespacharNoRetenida.filter(n=>n.estadoProg==='No programada');
+
+  const motivoGroupMap = {};
+  resDiferencia.forEach(n => {
+    const key = n.motivo || '(Sin motivo / OPERACIÓN vacía)';
+    if(!motivoGroupMap[key]) motivoGroupMap[key] = {motivo:key, cantidad:0, valor:0};
+    motivoGroupMap[key].cantidad++;
+    motivoGroupMap[key].valor += n.valorSaldo;
+  });
+  const resDiferenciaPorMotivo = Object.values(motivoGroupMap).sort((a,b)=>b.valor-a.valor);
+
+  const resSinMotivoDetalle = resDiferencia.filter(n=>!n.motivo).sort((a,b)=>b.valorSaldo-a.valorSaldo);
+
+  const resumenSituacion = {
+    total: {cantidad: resNvTotal.length, valor: sumValorNv(resNvTotal)},
+    retenidas: {cantidad: resRetenidas.length, valor: sumValorNv(resRetenidas)},
+    programables: {cantidad: resProgramables.length, valor: sumValorNv(resProgramables)},
+    retiraNoRetenida: {cantidad: resRetiraNoRetenida.length, valor: sumValorNv(resRetiraNoRetenida)},
+    despacharProgramable: {cantidad: resDespacharNoRetenida.length, valor: sumValorNv(resDespacharNoRetenida)},
+    programadas: {cantidad: resProgramadas.length, valor: sumValorNv(resProgramadas)},
+    diferencia: {cantidad: resDiferencia.length, valor: sumValorNv(resDiferencia)},
+    diferenciaPorMotivo: resDiferenciaPorMotivo,
+    sinMotivoDetalle: resSinMotivoDetalle
+  };
 
   const sumValor = arr => arr.reduce((s,n)=>s+n.valorSaldo,0);
 
@@ -1274,7 +1371,7 @@ function procesarDatos(rows){
     }
   });
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos };
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacion };
 }
 
 /* ============================================================
@@ -1285,6 +1382,7 @@ function render(){
   renderNvDiff();
   renderDashCards();
   renderDashChart();
+  renderResumenSituacion();
   renderDashVendorTable();
   renderDashOperacionTable();
   renderBloqueados();
@@ -1369,6 +1467,53 @@ function renderDashChart(){
 
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.innerHTML = svgContent;
+}
+
+function renderResumenSituacion(){
+  const r = RESULT.resumenSituacion;
+  const filas = [
+    {label:'Total NV', op:'', ...r.total, bold:true},
+    {label:'Total NV Retenidas', op:'Menos', ...r.retenidas},
+    {label:'Total NV programables', op:'=', ...r.programables, bold:true},
+    {label:'NV Retira Cliente No Retenidas', op:'Menos', ...r.retiraNoRetenida},
+    {label:'Total NV programables Por Despachar', op:'=', ...r.despacharProgramable, bold:true},
+    {label:'Total NV Programadas (total o parcial)', op:'Menos', ...r.programadas},
+    {label:'Diferencia (NV sin programar)', op:'=', ...r.diferencia, bold:true, destacar:true},
+  ];
+  document.getElementById('resumenSituacionTable').innerHTML = `
+    <thead><tr><th>Concepto</th><th></th><th>Cantidad NV</th><th>Valor</th></tr></thead>
+    <tbody>
+      ${filas.map(f=>`<tr ${f.destacar?'style="background:var(--red-bg);"':''}>
+        <td style="${f.bold?'font-weight:800;':''}">${esc(f.label)}</td>
+        <td style="color:var(--steel); font-size:11.5px;">${esc(f.op)}</td>
+        <td style="${f.bold?'font-weight:800;':''} ${f.destacar?'color:var(--red);':''}">${f.cantidad}</td>
+        <td style="${f.bold?'font-weight:800;':''} ${f.destacar?'color:var(--red);':''}">${money(f.valor)}</td>
+      </tr>`).join('')}
+    </tbody>`;
+
+  const rows = r.diferenciaPorMotivo;
+  const totCant = rows.reduce((s,x)=>s+x.cantidad,0), totVal = rows.reduce((s,x)=>s+x.valor,0);
+  document.getElementById('motivosDiferenciaTable').innerHTML = `
+    <thead><tr><th>Motivo (OPERACIÓN)</th><th>Cantidad NV</th><th>Valor</th></tr></thead>
+    <tbody>
+      ${rows.map(x=>`<tr><td>${esc(x.motivo)}</td><td>${x.cantidad}</td><td>${money(x.valor)}</td></tr>`).join('')}
+      <tr class="totalrow"><td>TOTAL GENERAL</td><td>${totCant}</td><td>${money(totVal)}</td></tr>
+    </tbody>`;
+
+  const sinMotivo = r.sinMotivoDetalle;
+  if(!sinMotivo.length){
+    document.getElementById('sinMotivoTable').innerHTML = `<tbody><tr><td class="empty">No hay NV sin motivo registrado en la Diferencia.</td></tr></tbody>`;
+  } else {
+    document.getElementById('sinMotivoTable').innerHTML = `
+      <thead><tr><th>NV</th><th>Fecha</th><th>Vendedor</th><th>Cliente</th><th>Valor</th></tr></thead>
+      <tbody>
+        ${sinMotivo.map(n=>`<tr>
+          <td>${esc(n.nv)}<span class="tag tag-${n.nvEstado}">${esc(n.nvEstado)}</span></td>
+          <td>${fmtFecha(n.fecha)}</td><td>${esc(n.vendedor)}</td><td>${esc(n.cliente)}</td><td>${money(n.valorSaldo)}</td>
+        </tr>`).join('')}
+      </tbody>`;
+  }
+  document.getElementById('sinMotivoFootnote').textContent = `${sinMotivo.length} NV sin motivo registrado · ${money(sinMotivo.reduce((s,n)=>s+n.valorSaldo,0))}`;
 }
 
 function renderDashVendorTable(){
@@ -2508,6 +2653,15 @@ document.getElementById('btnCerrarDiff').addEventListener('click', () => {
 });
 document.getElementById('btnCerrarNvDiff').addEventListener('click', () => {
   document.getElementById('nvDiffPanel').classList.add('hidden');
+});
+document.getElementById('btnVerDesgloseDiferencia').addEventListener('click', () => {
+  document.getElementById('modalDesgloseDiferencia').classList.remove('hidden');
+});
+document.getElementById('btnCerrarModalDiferencia').addEventListener('click', () => {
+  document.getElementById('modalDesgloseDiferencia').classList.add('hidden');
+});
+document.getElementById('modalDesgloseDiferencia').addEventListener('click', (e) => {
+  if(e.target.id === 'modalDesgloseDiferencia') document.getElementById('modalDesgloseDiferencia').classList.add('hidden');
 });
 
 if('serviceWorker' in navigator){
