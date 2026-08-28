@@ -362,16 +362,6 @@
       <div class="assumption-note">Una NV se marca "Programada" si TODAS sus líneas tienen FPROG con fecha; "Prog. Parcial" si solo algunas la tienen; "No programada" si ninguna la tiene.</div>
     </div>
 
-    <div class="panel">
-      <div class="panel-head"><h2>Dashboard General por Operación</h2></div>
-      <div class="panel-body">
-        <div class="tablewrap">
-          <table id="dashOperacionTable"></table>
-        </div>
-      </div>
-      <div class="assumption-note">Agrupa TODAS las NV vigentes (A/P) por el motivo de la columna OPERACIÓN (si una NV tiene líneas con motivos distintos, se agrupa bajo la combinación de todos). "Sin motivo / OPERACIÓN vacía" son NV sin ninguna razón documentada.</div>
-    </div>
-
     <div class="panel warn-panel hidden" id="bloqueadosPanel">
       <div class="panel-head"><h2>⚠ Clientes bloqueados detectados en NV vigentes (A/P) — excluidos del análisis de cobertura</h2></div>
       <div class="panel-body">
@@ -1425,7 +1415,6 @@ function render(){
   renderGraficosDashboard();
   renderResumenSituacion();
   renderDashVendorTable();
-  renderDashOperacionTable();
   renderBloqueados();
   renderNoProgramadas();
   renderResumenVendedor();
@@ -1635,25 +1624,6 @@ function renderDashVendorTable(){
     </tbody>`;
 }
 
-function renderDashOperacionTable(){
-  const rows = RESULT.dashboardPorOperacion;
-  const tot = k => rows.reduce((s,r)=>s+r[k],0);
-  document.getElementById('dashOperacionTable').innerHTML = `
-    <thead><tr>
-      <th>Operación (motivo)</th><th>Cantidad NV</th><th>Valor total</th><th>De las cuales No Programadas</th><th>Valor No Programadas</th>
-    </tr></thead>
-    <tbody>
-      ${rows.map(r=>`<tr>
-        <td>${esc(r.operacion)}</td><td>${r.cantidad}</td><td>${money(r.valor)}</td>
-        <td>${r.noProgramadas||'-'}</td><td>${r.noProgramadasValor? money(r.noProgramadasValor):'-'}</td>
-      </tr>`).join('')}
-      <tr class="totalrow">
-        <td>TOTAL GENERAL</td><td>${tot('cantidad')}</td><td>${money(tot('valor'))}</td>
-        <td>${tot('noProgramadas')}</td><td>${money(tot('noProgramadasValor'))}</td>
-      </tr>
-    </tbody>`;
-}
-
 function renderBloqueados(){
   const panel = document.getElementById('bloqueadosPanel');
   if(!RESULT.bloqueados.length){ panel.classList.add('hidden'); return; }
@@ -1692,11 +1662,12 @@ function renderNoProgramadas(){
   }
   document.getElementById('noProgTable').innerHTML = `
     <thead><tr>
-      <th>NV</th><th>Tipo</th><th>Vendedor</th><th>Cliente</th><th>Motivo (Operación)</th><th>Retenida</th><th>Bloqueada</th>
+      <th>NV</th><th>Fecha</th><th>Tipo</th><th>Vendedor</th><th>Cliente</th><th>Motivo (Operación)</th><th>Retenida</th><th>Bloqueada</th>
     </tr></thead>
     <tbody>
       ${sorted.map(n=>`<tr>
         <td>${esc(n.nv)}<span class="tag tag-${n.nvEstado}">${esc(n.nvEstado)}</span></td>
+        <td>${fmtFecha(n.fecha)}</td>
         <td><span class="badge ${n.tipo==='Retira Cliente'?'badge-retira':'badge-despacha'}">${esc(n.tipo)}</span></td>
         <td>${esc(n.vendedor)}</td>
         <td>${esc(n.cliente)}</td>
@@ -2445,7 +2416,7 @@ function exportAllExcel(){
   XLSX.utils.book_append_sheet(wb, wsOperacion, 'Dashboard x Operacion');
 
   const wsNoProg = XLSX.utils.json_to_sheet(RESULT.noProgramadasNV.map(n=>({
-    'NV': n.nv, 'Estado NV': n.nvEstado, 'Tipo': n.tipo, 'Vendedor': n.vendedor, 'Cliente': n.cliente,
+    'NV': n.nv, 'Estado NV': n.nvEstado, 'Fecha': fmtFecha(n.fecha), 'Tipo': n.tipo, 'Vendedor': n.vendedor, 'Cliente': n.cliente,
     'Motivo (Operación)': n.motivo || 'Sin motivo registrado',
     'Retenida': n.retenida==='Si'?'Sí':'', 'Bloqueada': n.bloqueado==='S'?'Sí':''
   })));
