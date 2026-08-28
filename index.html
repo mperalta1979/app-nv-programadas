@@ -424,7 +424,10 @@
     </div>
 
     <div class="panel">
-      <div class="panel-head"><h2>NV Retenidas por crédito (excluidas del análisis)</h2></div>
+      <div class="panel-head">
+        <h2>NV Retenidas por crédito (excluidas del análisis)</h2>
+        <button class="btn btn-export" id="btnExportRetenidas">⬇ Exportar Excel</button>
+      </div>
       <div class="panel-body">
         <div class="tablewrap">
           <table id="retenidasTable"></table>
@@ -710,6 +713,50 @@ let RESULT_PROD_ANTERIOR = null;
 let PROD_DIFF = null;
 let PROD_AOA_ACTUAL_RAW = null;
 let firebaseUnsubProd = null;
+
+/* -------- Motivo de retención por crédito (persistido y sincronizado) -------- */
+const RETENCION_MOTIVOS_OPCIONES = [
+  'POR TRANSFERENCIA ANTICIPADA',
+  'POR CHEQUE ADJUNTO ANTICIPADO',
+  'POR FACTURAS VENCIDAS',
+  'NO CUMPLE CON MINIMO DE VENTA',
+  'MONTO DE NV SUPERA CREDITO DISPONIBLE'
+];
+const RETENCION_MOTIVOS_KEY = 'nvprog_retencion_motivos_v1';
+let retencionMotivos = {};
+let firebaseUnsubRetenciones = null;
+
+function cargarRetencionMotivosLocal(){
+  try{ const raw = localStorage.getItem(RETENCION_MOTIVOS_KEY); return raw ? JSON.parse(raw) : {}; }catch(e){ return {}; }
+}
+function guardarRetencionMotivosLocal(obj){
+  try{ localStorage.setItem(RETENCION_MOTIVOS_KEY, JSON.stringify(obj)); }catch(e){}
+}
+function suscribirseARetencionMotivos(){
+  retencionMotivos = cargarRetencionMotivosLocal();
+  if(!firebaseListo) return;
+  if(firebaseUnsubRetenciones) firebaseUnsubRetenciones();
+  firebaseUnsubRetenciones = firebaseDb.collection('nv_programadas').doc('retenciones_motivos').onSnapshot(doc => {
+    if(doc.exists && doc.data().motivos){
+      retencionMotivos = doc.data().motivos;
+      guardarRetencionMotivosLocal(retencionMotivos);
+      if(RESULT) renderRetenidas();
+    }
+  }, err => console.warn('Error escuchando motivos de retención:', err));
+}
+function guardarMotivoRetencion(nv, motivo){
+  retencionMotivos[nv] = motivo;
+  guardarRetencionMotivosLocal(retencionMotivos);
+  if(firebaseListo){
+    const update = {};
+    update['motivos.'+nv] = motivo;
+    update.updatedAt = new Date().toISOString();
+    update.updatedBy = sesion ? sesion.username : 'desconocido';
+    update.claveAdmin = FIREBASE_ADMIN_KEY;
+    firebaseDb.collection('nv_programadas').doc('retenciones_motivos').set(update, {merge:true})
+      .catch(err => console.warn('No se pudo guardar el motivo de retención en la nube:', err));
+  }
+}
 
 function actualizarEstadoSyncProd(estado, detalle){
   const el = document.getElementById('syncStatusProd');
@@ -1830,17 +1877,55 @@ function renderRetenidas(){
     porNV[r.nv].valorSaldo += r.saldoValor;
   });
   const agrupadas = Object.values(porNV).sort((a,b)=>a.nv-b.nv);
+  const totalValor = agrupadas.reduce((s,r)=>s+r.valorSaldo,0);
 
   document.getElementById('retenidasTable').innerHTML = `
-    <thead><tr><th>NV</th><th>Fecha</th><th>Vendedor</th><th>Cliente</th><th>Tipo</th><th>Valor saldo</th></tr></thead>
+    <thead><tr><th>NV</th><th>Fecha</th><th>Vendedor</th><th>Cliente</th><th>Tipo</th><th>Valor saldo</th><th>Motivo de retención</th></tr></thead>
     <tbody>
       ${agrupadas.map(r=>`<tr>
         <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span></td>
         <td>${fmtFecha(r.fecha)}</td><td>${esc(r.vendedor)}</td><td>${esc(r.cliente)}</td>
         <td><span class="badge ${r.tipo==='Retira Cliente'?'badge-retira':'badge-despacha'}">${esc(r.tipo)}</span></td>
         <td>${money(r.valorSaldo)}</td>
+        <td>
+          <select data-nv="${esc(r.nv)}" class="retencionMotivoSelect" style="padding:4px 6px; border:1px solid var(--line); border-radius:4px; font-size:12px; min-width:220px;">
+            <option value="">-- Seleccionar motivo --</option>
+            ${RETENCION_MOTIVOS_OPCIONES.map(o=>`<option value="${esc(o)}" ${retencionMotivos[r.nv]===o?'selected':''}>${esc(o)}</option>`).join('')}
+          </select>
+        </td>
       </tr>`).join('')}
+      <tr class="totalrow">
+        <td>TOTAL GENERAL</td><td></td><td></td><td></td><td></td><td>${money(totalValor)}</td><td></td>
+      </tr>
     </tbody>`;
+
+  document.querySelectorAll('.retencionMotivoSelect').forEach(sel => sel.addEventListener('change', e => {
+    guardarMotivoRetencion(e.target.getAttribute('data-nv'), e.target.value);
+  }));
+}
+
+function exportRetenidasExcel(){
+  if(!RESULT || !RESULT.retenidas.length) return;
+  const porNV = {};
+  RESULT.retenidas.forEach(r => {
+    if(!porNV[r.nv]) porNV[r.nv] = {
+      nv:r.nv, nvEstado:r.nvEstado, fecha:r.fecha_dt, vendedor:r.vendedor, cliente:r.cliente,
+      tipo: r.retira==='Si' ? 'Retira Cliente' : 'Por Despachar', valorSaldo:0
+    };
+    porNV[r.nv].valorSaldo += r.saldoValor;
+  });
+  const agrupadas = Object.values(porNV).sort((a,b)=>a.nv-b.nv);
+  const totalValor = agrupadas.reduce((s,r)=>s+r.valorSaldo,0);
+
+  const wb = XLSX.utils.book_new();
+  const filas = agrupadas.map(r => ({
+    'NV': r.nv, 'Estado NV': r.nvEstado, 'Fecha': fmtFecha(r.fecha), 'Vendedor': r.vendedor, 'Cliente': r.cliente,
+    'Tipo': r.tipo, 'Valor Saldo': r.valorSaldo, 'Motivo de Retención': retencionMotivos[r.nv] || ''
+  }));
+  filas.push({'NV':'TOTAL GENERAL', 'Estado NV':'', 'Fecha':'', 'Vendedor':'', 'Cliente':'', 'Tipo':'', 'Valor Saldo': totalValor, 'Motivo de Retención':''});
+  const ws = XLSX.utils.json_to_sheet(filas);
+  XLSX.utils.book_append_sheet(wb, ws, 'NV Retenidas');
+  XLSX.writeFile(wb, `NV_Retenidas_Credito_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 /* ============================================================
@@ -1874,6 +1959,7 @@ function logout(){
   RESULT_PROD = null;
   if(firebaseUnsub){ firebaseUnsub(); firebaseUnsub = null; }
   if(firebaseUnsubProd){ firebaseUnsubProd(); firebaseUnsubProd = null; }
+  if(firebaseUnsubRetenciones){ firebaseUnsubRetenciones(); firebaseUnsubRetenciones = null; }
   document.getElementById('loginWrap').classList.remove('hidden');
   document.getElementById('mainWrap').classList.add('hidden');
   document.getElementById('sesionBar').classList.add('hidden');
@@ -1914,6 +2000,7 @@ function aplicarSesion(){
   }
   document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || esAdmin);
   suscribirseAProduccionNube();
+  suscribirseARetencionMotivos();
 
   renderTabsNav();
   if(sesion.role === 'admin') renderUsersTable();
@@ -2387,6 +2474,7 @@ document.getElementById('btnImportUsers').addEventListener('click', () => docume
 document.getElementById('importUsersInput').addEventListener('change', e => { if(e.target.files[0]) importarUsuarios(e.target.files[0]); });
 document.getElementById('importDatosInput').addEventListener('change', e => { if(e.target.files[0]) importarDatosCargados(e.target.files[0]); });
 document.getElementById('pdExportBtn').addEventListener('click', pdExportExcel);
+document.getElementById('btnExportRetenidas').addEventListener('click', exportRetenidasExcel);
 document.getElementById('pdSearchBox').addEventListener('input', e => { pdSearch = e.target.value; renderProgramaDespachoTabla(); });
 document.getElementById('pdEstadoFiltro').addEventListener('change', e => { pdEstadoFiltro = e.target.value; renderProgramaDespachoTabla(); });
 document.getElementById('pdProgFiltro').addEventListener('change', e => { pdProgFiltro = e.target.value; renderProgramaDespachoTabla(); });
