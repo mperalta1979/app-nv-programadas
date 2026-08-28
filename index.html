@@ -338,7 +338,7 @@
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panelResumenA">
       <div class="panel-head"><h2>Resumen Situación Notas de Venta — Aprobadas (A)</h2></div>
       <div class="panel-body pad">
         <div class="tablewrap">
@@ -348,7 +348,7 @@
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panelResumenP">
       <div class="panel-head"><h2>Resumen Situación Notas de Venta — Pendientes (P)</h2></div>
       <div class="panel-body pad">
         <div class="tablewrap">
@@ -358,7 +358,7 @@
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panelDashboardVendedor">
       <div class="panel-head"><h2>Dashboard por vendedor</h2></div>
       <div class="panel-body">
         <div class="tablewrap">
@@ -377,7 +377,7 @@
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panelNoProgramadas">
       <div class="panel-head">
         <h2>NV No Programadas — detalle por tipo y motivo</h2>
       </div>
@@ -394,9 +394,9 @@
       <div class="assumption-note">Motivo = valores de la columna OPERACIÓN de las líneas de esa NV (excluyendo "0"/vacío). Si una NV tiene líneas con motivos distintos, se listan todos separados por "/".</div>
     </div>
 
-    <div class="section-title">Programable — cobertura de stock disponible</div>
+    <div class="section-title" id="programableSectionTitle">Programable — cobertura de stock disponible</div>
 
-    <div class="panel">
+    <div class="panel" id="panelProgramableResumen">
       <div class="panel-head">
         <h2>Resumen de cobertura por vendedor</h2>
         <button class="btn btn-export" id="btnExportAll">⬇ Descargar Excel completo</button>
@@ -409,7 +409,7 @@
       <div class="assumption-note">Solo entran a este análisis las líneas AÚN NO programadas (las programadas ya están descontadas del stock vía QPROG). El stock disponible de cada código se reparte primero entre Por Despachar no programadas (por fecha) y luego, con lo que sobra, entre Retira Cliente no programadas (por fecha).</div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panelCoberturaVendedor">
       <div class="panel-head"><h2>Análisis de cobertura por vendedor</h2></div>
       <div class="tabs" id="vendorTabs"></div>
       <div class="seg" id="tipoSeg">
@@ -428,7 +428,7 @@
       <div class="footer-note" id="vendorFootnote"></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panelRetenidas">
       <div class="panel-head">
         <h2>NV Retenidas por crédito (excluidas del análisis)</h2>
         <button class="btn btn-export" id="btnExportRetenidas">⬇ Exportar Excel</button>
@@ -1008,17 +1008,41 @@ const PERMISOS_DISPONIBLES = [
   {key:'editarRetencion', label:'Editar motivo de retención'},
   {key:'exportarExcel', label:'Exportar a Excel'},
   {key:'accesoMaestro', label:'Acceso a Maestro'},
+  {key:'verResumenA', label:'Ver Resumen Situación — Aprobadas (A)'},
+  {key:'verResumenP', label:'Ver Resumen Situación — Pendientes (P)'},
+  {key:'verDashboardVendedor', label:'Ver Dashboard por vendedor'},
+  {key:'verBloqueados', label:'Ver Clientes bloqueados'},
+  {key:'verNoProgramadas', label:'Ver NV No Programadas — detalle'},
+  {key:'verProgramableResumen', label:'Ver Programable — resumen cobertura por vendedor'},
+  {key:'verCoberturaVendedor', label:'Ver Análisis de cobertura por vendedor'},
+  {key:'verRetenidas', label:'Ver NV Retenidas por crédito'},
 ];
 const ROLES_CONFIG_KEY = 'nvprog_roles_config_v1';
 function permisosVacios(){ const o={}; PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=false); return o; }
+const PANELES_ANALISIS = ['verResumenA','verResumenP','verDashboardVendedor','verBloqueados','verNoProgramadas','verProgramableResumen','verCoberturaVendedor','verRetenidas'];
+function permisosPanelesAnalisis(valor){ const o={}; PANELES_ANALISIS.forEach(k=>o[k]=valor); return o; }
 function seedRolesConfig(){
   return {
     admin: {label:'Administrador', permisos: (()=>{const o=permisosVacios(); PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=true); return o;})()},
     vendedor: {label:'Vendedor', permisos: {...permisosVacios(), verDespacho:true, verProduccion:true, exportarExcel:true}},
-    gerencia_general: {label:'Gerencia General', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true}},
-    gerencia_comercial: {label:'Gerencia Comercial', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true}},
-    solo_lectura: {label:'Solo Lectura', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, exportarExcel:true}},
+    gerencia_general: {label:'Gerencia General', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, ...permisosPanelesAnalisis(true)}},
+    gerencia_comercial: {label:'Gerencia Comercial', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, ...permisosPanelesAnalisis(true)}},
+    solo_lectura: {label:'Solo Lectura', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, exportarExcel:true, ...permisosPanelesAnalisis(true)}},
   };
+}
+function normalizarRolesConfig(cfg){
+  Object.keys(cfg).forEach(key => {
+    const rol = cfg[key];
+    if(!rol.permisos) rol.permisos = permisosVacios();
+    PERMISOS_DISPONIBLES.forEach(p => {
+      if(rol.permisos[p.key] === undefined){
+        // Permiso nuevo que no existía cuando se guardó esta config: hereda de verAnalisis
+        // para no ocultar de golpe paneles que antes sí se veían.
+        rol.permisos[p.key] = !!rol.permisos['verAnalisis'];
+      }
+    });
+  });
+  return cfg;
 }
 function cargarRolesConfigLocal(){
   try{ const raw = localStorage.getItem(ROLES_CONFIG_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
@@ -1026,7 +1050,7 @@ function cargarRolesConfigLocal(){
 function guardarRolesConfigLocal(cfg){
   try{ localStorage.setItem(ROLES_CONFIG_KEY, JSON.stringify(cfg)); }catch(e){}
 }
-let ROLES_CONFIG = cargarRolesConfigLocal() || seedRolesConfig();
+let ROLES_CONFIG = normalizarRolesConfig(cargarRolesConfigLocal() || seedRolesConfig());
 if(!cargarRolesConfigLocal()) guardarRolesConfigLocal(ROLES_CONFIG);
 let firebaseUnsubRoles = null;
 
@@ -1053,7 +1077,7 @@ function suscribirseARolesConfig(){
   if(firebaseUnsubRoles) firebaseUnsubRoles();
   firebaseUnsubRoles = firebaseDb.collection('nv_programadas').doc('roles_config').onSnapshot(doc => {
     if(doc.exists && doc.data().roles){
-      ROLES_CONFIG = doc.data().roles;
+      ROLES_CONFIG = normalizarRolesConfig(doc.data().roles);
       guardarRolesConfigLocal(ROLES_CONFIG);
       if(sesion){
         renderTabsNav();
@@ -1615,6 +1639,21 @@ function procesarDatos(rows){
 /* ============================================================
    Render
    ============================================================ */
+function aplicarPermisosPanelesAnalisis(){
+  const mapa = {
+    panelResumenA:'verResumenA', panelResumenP:'verResumenP',
+    panelDashboardVendedor:'verDashboardVendedor', panelNoProgramadas:'verNoProgramadas',
+    panelProgramableResumen:'verProgramableResumen', panelCoberturaVendedor:'verCoberturaVendedor',
+    panelRetenidas:'verRetenidas'
+  };
+  Object.keys(mapa).forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('hidden', !tienePermiso(mapa[id]));
+  });
+  const tituloSeccion = document.getElementById('programableSectionTitle');
+  if(tituloSeccion) tituloSeccion.classList.toggle('hidden', !tienePermiso('verProgramableResumen') && !tienePermiso('verCoberturaVendedor'));
+}
+
 function render(){
   document.getElementById('app').classList.remove('hidden');
   renderDashCards();
@@ -1626,6 +1665,7 @@ function render(){
   renderResumenVendedor();
   renderTabs();
   renderRetenidas();
+  aplicarPermisosPanelesAnalisis();
   if(sesion){
     renderTabsNav();
     renderProgramaDespacho();
@@ -1864,7 +1904,7 @@ function renderDashVendorTable(){
 
 function renderBloqueados(){
   const panel = document.getElementById('bloqueadosPanel');
-  if(!RESULT.bloqueados.length){ panel.classList.add('hidden'); return; }
+  if(!tienePermiso('verBloqueados') || !RESULT.bloqueados.length){ panel.classList.add('hidden'); return; }
   panel.classList.remove('hidden');
   const porCliente = {};
   RESULT.bloqueados.forEach(b=>{
