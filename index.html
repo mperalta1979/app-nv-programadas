@@ -1163,11 +1163,14 @@ function procesarDatos(rows){
     const resDiferencia = resDespacharNoRetenida.filter(n=>n.estadoProg==='No programada');
 
     const motivoGroupMap = {};
+    const motivoDetalleMap = {};
     resDiferencia.forEach(n => {
       const key = n.motivo || '(Sin motivo / OPERACIÓN vacía)';
       if(!motivoGroupMap[key]) motivoGroupMap[key] = {motivo:key, cantidad:0, valor:0};
       motivoGroupMap[key].cantidad++;
       motivoGroupMap[key].valor += n.valorSaldo;
+      if(!motivoDetalleMap[key]) motivoDetalleMap[key] = [];
+      motivoDetalleMap[key].push(n);
     });
     const resDiferenciaPorMotivo = Object.values(motivoGroupMap).sort((a,b)=>b.valor-a.valor);
 
@@ -1190,6 +1193,7 @@ function procesarDatos(rows){
       programadas: {cantidad: resProgramadas.length, valor: sumValorNv(resProgramadas)},
       diferencia: {cantidad: resDiferencia.length, valor: sumValorNv(resDiferencia)},
       diferenciaPorMotivo: resDiferenciaPorMotivo,
+      diferenciaPorMotivoDetalle: motivoDetalleMap,
       sinMotivoDetalle: resSinMotivoDetalle
     };
   }
@@ -1504,8 +1508,9 @@ function renderDashCards(){
   `).join('');
 }
 
-function renderPieChart(svgId, legendId, data){
+function renderPieChart(svgId, legendId, data, opciones){
   // data: [{label, valor, color}]
+  opciones = opciones || {};
   const svg = document.getElementById(svgId);
   const legendEl = document.getElementById(legendId);
   const total = data.reduce((s,d)=>s+d.valor, 0);
@@ -1532,17 +1537,27 @@ function renderPieChart(svgId, legendId, data){
   });
   svg.innerHTML = svgContent;
 
-  legendEl.innerHTML = data.filter(d=>d.valor>0).map(d => `
+  legendEl.innerHTML = data.filter(d=>d.valor>0).map(d => {
+    const esDescargable = opciones.descargables && DESCARGABLE_MOTIVOS.includes(d.label);
+    return `
     <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
       <span style="display:inline-block; width:10px; height:10px; border-radius:2px; background:${d.color}; flex-shrink:0;"></span>
       <span style="flex:1;">${esc(d.label)}</span>
       <span style="font-weight:700; white-space:nowrap;">${money(d.valor)}</span>
       <span style="color:var(--steel); white-space:nowrap;">(${(d.valor/total*100).toFixed(1)}%)</span>
-    </div>
-  `).join('');
+      ${esDescargable ? `<button type="button" class="btn btn-ghost pie-download-btn" data-motivo="${esc(d.label)}" style="padding:2px 8px; font-size:11px; flex-shrink:0;" title="Descargar Excel de estas NV">⬇</button>` : ''}
+    </div>`;
+  }).join('');
+
+  if(opciones.descargables){
+    legendEl.querySelectorAll('.pie-download-btn').forEach(btn => {
+      btn.addEventListener('click', () => opciones.onDescargar(btn.getAttribute('data-motivo')));
+    });
+  }
 }
 
 const PALETA_MOTIVOS = ['#1F4E78','#2e75b6','#6a3fa0','#1e8e5a','#a9720a','#c1620a','#b3352b','#0b7285','#7048e8','#087f5b','#e8590c','#495057'];
+const DESCARGABLE_MOTIVOS = ['SOLICITA VENDEDORA', 'RETENIDA X VENDEDORA', 'AGENDA CITA', 'AVISA CLIENTE', 'CONCLUIR'];
 
 function renderPieResumen(svgId, legendId, r){
   const RED = '#b3352b', RETIRA = '#2e75b6', GREEN = '#1e8e5a', NARANJO = '#c1620a';
@@ -1554,15 +1569,34 @@ function renderPieResumen(svgId, legendId, r){
   ]);
 }
 
-function renderPieMotivos(svgId, legendId, r){
+function renderPieMotivos(svgId, legendId, r, opciones){
   const datos = r.diferenciaPorMotivo.map((m,i) => ({label: m.motivo, valor: m.valor, color: PALETA_MOTIVOS[i % PALETA_MOTIVOS.length]}));
-  renderPieChart(svgId, legendId, datos);
+  renderPieChart(svgId, legendId, datos, opciones);
+}
+
+function exportarMotivoExcel(resumen, motivo, estadoLabel){
+  const nvs = (resumen.diferenciaPorMotivoDetalle && resumen.diferenciaPorMotivoDetalle[motivo]) || [];
+  if(!nvs.length){ alert('No hay NV para este motivo.'); return; }
+  const ordenadas = [...nvs].sort((a,b)=>{
+    const fa = a.fecha ? a.fecha.getTime() : Infinity;
+    const fb = b.fecha ? b.fecha.getTime() : Infinity;
+    return fa - fb;
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(ordenadas.map(n => ({
+    'NV': n.nv, 'Estado NV': n.nvEstado, 'Fecha': fmtFecha(n.fecha), 'Cliente': n.cliente, 'Vendedor': n.vendedor, 'Monto': n.valorSaldo
+  })));
+  XLSX.utils.book_append_sheet(wb, ws, motivo.substring(0,31));
+  XLSX.writeFile(wb, `NV_${motivo.replace(/[^a-zA-Z0-9]/g,'_')}_${estadoLabel}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function renderGraficosDashboard(){
   renderPieResumen('pieResumenA', 'pieResumenALegend', RESULT.resumenSituacionA);
   renderPieResumen('pieResumenP', 'pieResumenPLegend', RESULT.resumenSituacionP);
-  renderPieMotivos('pieMotivosA', 'pieMotivosALegend', RESULT.resumenSituacionA);
+  renderPieMotivos('pieMotivosA', 'pieMotivosALegend', RESULT.resumenSituacionA, {
+    descargables: true,
+    onDescargar: (motivo) => exportarMotivoExcel(RESULT.resumenSituacionA, motivo, 'Aprobadas')
+  });
   renderPieMotivos('pieMotivosP', 'pieMotivosPLegend', RESULT.resumenSituacionP);
 }
 
