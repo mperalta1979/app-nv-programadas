@@ -1538,7 +1538,7 @@ function renderPieChart(svgId, legendId, data, opciones){
   svg.innerHTML = svgContent;
 
   legendEl.innerHTML = data.filter(d=>d.valor>0).map(d => {
-    const esDescargable = opciones.descargables && DESCARGABLE_MOTIVOS.includes(d.label);
+    const esDescargable = opciones.descargables;
     return `
     <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
       <span style="display:inline-block; width:10px; height:10px; border-radius:2px; background:${d.color}; flex-shrink:0;"></span>
@@ -1557,7 +1557,6 @@ function renderPieChart(svgId, legendId, data, opciones){
 }
 
 const PALETA_MOTIVOS = ['#1F4E78','#2e75b6','#6a3fa0','#1e8e5a','#a9720a','#c1620a','#b3352b','#0b7285','#7048e8','#087f5b','#e8590c','#495057'];
-const DESCARGABLE_MOTIVOS = ['SOLICITA VENDEDORA', 'RETENIDA X VENDEDORA', 'AGENDA CITA', 'AVISA CLIENTE', 'CONCLUIR'];
 
 function renderPieResumen(svgId, legendId, r){
   const RED = '#b3352b', RETIRA = '#2e75b6', GREEN = '#1e8e5a', NARANJO = '#c1620a';
@@ -1597,7 +1596,10 @@ function renderGraficosDashboard(){
     descargables: true,
     onDescargar: (motivo) => exportarMotivoExcel(RESULT.resumenSituacionA, motivo, 'Aprobadas')
   });
-  renderPieMotivos('pieMotivosP', 'pieMotivosPLegend', RESULT.resumenSituacionP);
+  renderPieMotivos('pieMotivosP', 'pieMotivosPLegend', RESULT.resumenSituacionP, {
+    descargables: true,
+    onDescargar: (motivo) => exportarMotivoExcel(RESULT.resumenSituacionP, motivo, 'Pendientes')
+  });
 }
 
 function renderResumenSituacionBox(tablaId, r){
