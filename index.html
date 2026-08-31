@@ -933,9 +933,10 @@ function cargarProduccionLocal(){
 }
 function mostrarInfoProduccion(filename, savedAt){
   const el = document.getElementById('prodDatosInfo');
+  if(!sesion || !tienePermiso('accesoMaestro')){ el.classList.add('hidden'); return; }
   const fecha = new Date(savedAt);
   el.innerHTML = `📌 Programa cargado: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')})` +
-    (sesion && tienePermiso('accesoMaestro') ? ` <button class="btn btn-ghost" id="btnBorrarProduccion" style="padding:3px 10px; margin-left:8px;">Borrar</button>` : '');
+    ` <button class="btn btn-ghost" id="btnBorrarProduccion" style="padding:3px 10px; margin-left:8px;">Borrar</button>`;
   el.classList.remove('hidden');
   const btn = document.getElementById('btnBorrarProduccion');
   if(btn) btn.addEventListener('click', borrarProduccion);
@@ -1610,6 +1611,10 @@ function procesarDatos(rows){
     pendientesValor: sumValor(nvList.filter(n=>n.nvEstado==='P')),
     programadas: nvList.filter(n=>n.estadoProg==='Programada').length,
     programadasValor: sumValor(nvList.filter(n=>n.estadoProg==='Programada')),
+    programadasRetira: nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Retira Cliente').length,
+    programadasRetiraValor: sumValor(nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Retira Cliente')),
+    programadasDespacho: nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Por Despachar').length,
+    programadasDespachoValor: sumValor(nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Por Despachar')),
     progParcial: nvList.filter(n=>n.estadoProg==='Prog. Parcial').length,
     progParcialValor: sumValor(nvList.filter(n=>n.estadoProg==='Prog. Parcial')),
     noProgramadas: noProgramadasNV.length,
@@ -1969,7 +1974,7 @@ function renderDashCards(){
     {label:'NV totales (A/P)', value: d.totalNV, sub: money(d.totalValor)},
     {label:'Aprobadas', value: d.aprobadas, cls:'blue', sub: money(d.aprobadasValor)},
     {label:'Pendientes', value: d.pendientes, cls:'yellow', sub: money(d.pendientesValor)},
-    {label:'Programadas', value: d.programadas, cls:'green', sub: money(d.programadasValor)},
+    {label:'Programadas', value: d.programadas, cls:'green', sub: `${money(d.programadasValor)} · Retira: ${d.programadasRetira} (${money(d.programadasRetiraValor)}) · Despacho: ${d.programadasDespacho} (${money(d.programadasDespachoValor)})`},
     {label:'Prog. Parcial', value: d.progParcial, cls:'yellow', sub: money(d.progParcialValor)},
     {label:'No programadas', value: d.noProgramadas, sub:`${money(d.noProgramadasValor)} · Retira: ${d.noProgRetira} (${money(d.noProgRetiraValor)}) · Despacho: ${d.noProgDespacho} (${money(d.noProgDespachoValor)})`},
     {label:'NV sin programar por falta de stock', value: d.sinStockTotal, cls: d.sinStockTotal?'red':'', sub:`${money(d.sinStockTotalValor)} · Retira: ${d.sinStockRetira} (${money(d.sinStockRetiraValor)}) · Despacho: ${d.sinStockDespacho} (${money(d.sinStockDespachoValor)})`},
@@ -2968,7 +2973,7 @@ function renderProduccion(){
 
 function renderProdDiff(){
   const panel = document.getElementById('prodDiffPanel');
-  if(!PROD_DIFF || (!PROD_DIFF.nuevos.length && !PROD_DIFF.eliminados.length && !PROD_DIFF.modificados.length)){
+  if(!sesion || !tienePermiso('accesoMaestro') || !PROD_DIFF || (!PROD_DIFF.nuevos.length && !PROD_DIFF.eliminados.length && !PROD_DIFF.modificados.length)){
     panel.classList.add('hidden');
     return;
   }
