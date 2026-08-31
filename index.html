@@ -301,6 +301,19 @@
       </div>
       <div class="footer-note">Marca o desmarca los permisos de cada rol — se guardan y sincronizan al instante para todos los usuarios con ese rol. El nombre visible también es editable (haz clic y escribe).</div>
     </div>
+
+    <div id="guiasPanel" class="panel">
+      <div class="panel-head"><h2>📄 Guías de Despacho (Query_Guias_de_Despacho.xlsx)</h2></div>
+      <div class="panel-body pad">
+        <div class="uploadbox" style="margin-bottom:12px;">
+          <button class="uploadbtn" id="btnPickGuias">Cargar Guías de Despacho</button>
+          <input type="file" id="fileInputGuias" accept=".xlsx,.xls">
+          <div class="uploadhint">Solo se guardan los últimos 15 días para no exceder el límite de la nube. Se usa para confirmar si una NV Retira Cliente / Por Despachar programada realmente salió.</div>
+          <div class="filename" id="filenameGuias"></div>
+        </div>
+        <div id="guiasDatosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px;"></div>
+      </div>
+    </div>
   </div>
 
   <div id="app" class="hidden">
@@ -537,6 +550,58 @@
         </div>
       </div>
       <div class="footer-note" id="prodFootnote"></div>
+    </div>
+  </div>
+
+  <div id="tabNoEfectuados" class="hidden">
+    <div class="section-title">Retiro / Despacho No Efectuado</div>
+    <div id="guiasEstadoNota" class="assumption-note"></div>
+
+    <div class="cards" id="noEfectuadosCards"></div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>🚫 Retiro No Efectuado — Retira Cliente</h2>
+        <button class="btn btn-export" id="btnExportRetiroNoEf">⬇ Exportar Excel (para vendedores)</button>
+      </div>
+      <div class="toolbar">
+        <select id="neRetiroVendedorFiltro" style="padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;"></select>
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="retiroNoEfTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>🚫 Por Despachar No Efectuado</h2>
+        <button class="btn btn-export" id="btnExportDespachoNoEf">⬇ Exportar Excel (para jefe de despacho)</button>
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="despachoNoEfTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>📊 Resumen Semanal</h2></div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="resumenSemanalTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel hidden" id="devolucionesPanel">
+      <div class="panel-head"><h2>↩️ Devoluciones detectadas (guías Tipo Entrada vinculadas a NV)</h2></div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="devolucionesTable"></table>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1016,6 +1081,7 @@ const PERMISOS_DISPONIBLES = [
   {key:'verProgramableResumen', label:'Ver Programable — resumen cobertura por vendedor'},
   {key:'verCoberturaVendedor', label:'Ver Análisis de cobertura por vendedor'},
   {key:'verRetenidas', label:'Ver NV Retenidas por crédito'},
+  {key:'verNoEfectuados', label:'Ver Retiro/Despacho No Efectuado'},
 ];
 const ROLES_CONFIG_KEY = 'nvprog_roles_config_v1';
 function permisosVacios(){ const o={}; PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=false); return o; }
@@ -1024,10 +1090,10 @@ function permisosPanelesAnalisis(valor){ const o={}; PANELES_ANALISIS.forEach(k=
 function seedRolesConfig(){
   return {
     admin: {label:'Administrador', permisos: (()=>{const o=permisosVacios(); PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=true); return o;})()},
-    vendedor: {label:'Vendedor', permisos: {...permisosVacios(), verDespacho:true, verProduccion:true, exportarExcel:true}},
-    gerencia_general: {label:'Gerencia General', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, ...permisosPanelesAnalisis(true)}},
-    gerencia_comercial: {label:'Gerencia Comercial', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, ...permisosPanelesAnalisis(true)}},
-    solo_lectura: {label:'Solo Lectura', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, exportarExcel:true, ...permisosPanelesAnalisis(true)}},
+    vendedor: {label:'Vendedor', permisos: {...permisosVacios(), verDespacho:true, verProduccion:true, exportarExcel:true, verNoEfectuados:true}},
+    gerencia_general: {label:'Gerencia General', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
+    gerencia_comercial: {label:'Gerencia Comercial', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
+    solo_lectura: {label:'Solo Lectura', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
   };
 }
 function normalizarRolesConfig(cfg){
@@ -1053,6 +1119,160 @@ function guardarRolesConfigLocal(cfg){
 let ROLES_CONFIG = normalizarRolesConfig(cargarRolesConfigLocal() || seedRolesConfig());
 if(!cargarRolesConfigLocal()) guardarRolesConfigLocal(ROLES_CONFIG);
 let firebaseUnsubRoles = null;
+
+/* ============================================================
+   Guías de Despacho — cruce con NV programadas (Retiro/Despacho No Efectuado)
+   ============================================================ */
+const VENTANA_GUIAS_DIAS = 15;
+const GUIAS_KEY = 'nvprog_guias_v1';
+let GUIAS_DATA = null; // {porNVCodigo: {'nv|codigo': [fechasISO...]}, devoluciones: {'nv': [{...}]}, filename, savedAt}
+let firebaseUnsubGuias = null;
+
+function procesarGuias(rows){
+  const porNVCodigo = {};
+  const devolucionesMap = {};
+  rows.forEach(r => {
+    const nv = r['nvnumero'];
+    const codigo = r['CodProd'] !== undefined && r['CodProd'] !== null ? String(r['CodProd']).trim() : '';
+    const fecha = r['Fecha'];
+    if(!nv || !codigo || !fecha) return;
+    const tipo = (r['Tipo']||'').toString().trim();
+    const estado = (r['Estado']||'').toString().trim();
+    if(tipo === 'S' && estado === 'V'){
+      const key = nv + '|' + codigo;
+      if(!porNVCodigo[key]) porNVCodigo[key] = [];
+      porNVCodigo[key].push(fecha);
+    } else if(tipo === 'E' && Number(nv) !== 0){
+      if(!devolucionesMap[nv]) devolucionesMap[nv] = [];
+      devolucionesMap[nv].push({codigo, fecha, cantidad: r['cantdespuvta'], valor: r['TotLinea']});
+    }
+  });
+  return {porNVCodigo, devoluciones: devolucionesMap};
+}
+
+function existeGuiaCumplida(nv, codigo, fprogFecha, hoySinHora){
+  if(!GUIAS_DATA) return null; // sin datos de guías cargados: no se puede confirmar ni descartar
+  const lista = GUIAS_DATA.porNVCodigo[nv + '|' + codigo];
+  if(!lista || !lista.length) return false;
+  return lista.some(fISO => {
+    const f = new Date(fISO);
+    f.setHours(0,0,0,0);
+    return f.getTime() >= fprogFecha.getTime() && f.getTime() <= hoySinHora.getTime();
+  });
+}
+
+function parseFechaGuia(v){
+  if(v===null || v===undefined || v==='') return null;
+  if(v instanceof Date) return isNaN(v) ? null : v;
+  if(typeof v === 'number') return excelSerialToDate(v);
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
+}
+
+function trimirGuias(rows){
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const corte = new Date(hoy.getTime() - VENTANA_GUIAS_DIAS*86400000);
+  return rows.map(r => {
+    const fecha = parseFechaGuia(r['Fecha']);
+    return {r, fecha};
+  }).filter(({r, fecha}) => {
+    if(!fecha) return false;
+    const d = new Date(fecha); d.setHours(0,0,0,0);
+    if(d.getTime() < corte.getTime()) return false;
+    const tipo = (r['Tipo']||'').toString().trim();
+    const estado = (r['Estado']||'').toString().trim();
+    if(tipo==='S' && estado==='V') return true;
+    if(tipo==='E' && Number(r['nvnumero'])!==0) return true;
+    return false;
+  }).map(({r, fecha}) => ({
+    nvnumero: r['nvnumero'], CodProd: r['CodProd'], Fecha: fecha.toISOString(),
+    Tipo: r['Tipo'], Estado: r['Estado'], cantdespuvta: r['cantdespuvta'], TotLinea: r['TotLinea']
+  }));
+}
+
+function guardarGuiasLocal(paquete){
+  try{ localStorage.setItem(GUIAS_KEY, JSON.stringify(paquete)); }catch(e){}
+}
+function cargarGuiasLocal(){
+  try{ const raw = localStorage.getItem(GUIAS_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
+}
+function mostrarInfoGuias(filename, savedAt){
+  const el = document.getElementById('guiasDatosInfo');
+  if(!el) return;
+  const fecha = new Date(savedAt);
+  el.innerHTML = `📌 Guías cargadas: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')}) — solo últimos ${VENTANA_GUIAS_DIAS} días.` +
+    (tienePermiso('accesoMaestro') ? ` <button class="btn btn-ghost" id="btnBorrarGuias" style="padding:3px 10px; margin-left:8px;">Borrar</button>` : '');
+  el.classList.remove('hidden');
+  const btn = document.getElementById('btnBorrarGuias');
+  if(btn) btn.addEventListener('click', borrarGuias);
+}
+function recalcularConGuias(){
+  if(NV_ROWS_ACTUAL_RAW && NV_ROWS_ACTUAL_RAW.rows){
+    RESULT = procesarDatos(NV_ROWS_ACTUAL_RAW.rows);
+  }
+  if(RESULT) render();
+}
+
+function borrarGuias(){
+  if(!confirm('¿Borrar las Guías de Despacho cargadas? Se borran para TODOS los usuarios sincronizados.')) return;
+  localStorage.removeItem(GUIAS_KEY);
+  if(firebaseListo) firebaseDb.collection('nv_programadas').doc('guias').delete().catch(err=>console.warn(err));
+  GUIAS_DATA = null;
+  document.getElementById('filenameGuias').textContent = '';
+  document.getElementById('guiasDatosInfo').classList.add('hidden');
+  recalcularConGuias();
+}
+
+function guardarGuiasEnNube(rowsTrimmed, filename){
+  if(!firebaseListo) return Promise.resolve(false);
+  return firebaseDb.collection('nv_programadas').doc('guias').set({
+    rows: rowsTrimmed, filename, savedAt: new Date().toISOString(),
+    subidoPor: sesion ? sesion.username : 'desconocido', claveAdmin: FIREBASE_ADMIN_KEY
+  }).catch(err => console.warn('No se pudo subir guías a la nube:', err));
+}
+
+function aplicarDatosGuias(paquete){
+  guardarGuiasLocal(paquete);
+  GUIAS_DATA = procesarGuias(paquete.rows);
+  GUIAS_DATA.filename = paquete.filename;
+  GUIAS_DATA.savedAt = paquete.savedAt;
+  const filenameEl = document.getElementById('filenameGuias');
+  if(filenameEl) filenameEl.textContent = paquete.filename || '';
+  mostrarInfoGuias(paquete.filename || '(sin nombre)', paquete.savedAt);
+}
+
+function suscribirseAGuias(){
+  const local = cargarGuiasLocal();
+  if(local && local.rows) aplicarDatosGuias(local);
+  if(!firebaseListo) return;
+  if(firebaseUnsubGuias) firebaseUnsubGuias();
+  firebaseUnsubGuias = firebaseDb.collection('nv_programadas').doc('guias').onSnapshot(doc => {
+    if(doc.exists && doc.data().rows){
+      const data = doc.data();
+      aplicarDatosGuias({rows: data.rows, filename: data.filename, savedAt: data.savedAt});
+      recalcularConGuias();
+    }
+  }, err => console.warn('Error escuchando guías:', err));
+}
+
+function handleFileGuias(file){
+  const filenameEl = document.getElementById('filenameGuias');
+  if(filenameEl) filenameEl.textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const data = new Uint8Array(e.target.result);
+    const wb = XLSX.read(data, {type:'array', cellDates:true});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {defval:null});
+    const trimmed = trimirGuias(rows);
+    const paquete = {rows: trimmed, filename: file.name, savedAt: new Date().toISOString()};
+    aplicarDatosGuias(paquete);
+    guardarGuiasEnNube(trimmed, file.name);
+    recalcularConGuias();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
 
 function tienePermiso(permiso){
   if(!sesion) return false;
@@ -1633,7 +1853,73 @@ function procesarDatos(rows){
     }
   });
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP };
+  /* -------- Retiro/Despacho No Efectuado: FPROG ya pasó pero sigue con saldo pendiente -------- */
+  const hoySinHora = new Date(); hoySinHora.setHours(0,0,0,0);
+  function semanaLabel(fecha){
+    const d = new Date(fecha); d.setHours(0,0,0,0);
+    const dia = d.getDay();
+    const offset = dia===0 ? -6 : 1-dia;
+    const lunes = new Date(d); lunes.setDate(d.getDate()+offset);
+    const domingo = new Date(lunes); domingo.setDate(lunes.getDate()+6);
+    return `${fmtFecha(lunes)} al ${fmtFecha(domingo)}`;
+  }
+  const usaGuias = !!GUIAS_DATA;
+  const vencidas = disponibles.filter(r => {
+    if(!r.fprogFecha || r.fprogFecha.getTime() >= hoySinHora.getTime() || r.retenida === 'Si') return false;
+    if(usaGuias) return !existeGuiaCumplida(r.nv, r.codigo, r.fprogFecha, hoySinHora);
+    return r.saldo > 0; // respaldo mientras no haya guías cargadas
+  });
+  function mapVencida(r, estadoTxt){
+    const diasAtraso = Math.floor((hoySinHora.getTime() - r.fprogFecha.getTime()) / 86400000);
+    return {
+      nv:r.nv, nvEstado:r.nvEstado, codigo:r.codigo, producto:r.producto, cliente:r.cliente, vendedor:r.vendedor,
+      fechaProgramada:r.fprogFecha, diasAtraso, saldo:r.saldo, valor:r.saldoValor,
+      estado: estadoTxt, semana: semanaLabel(r.fprogFecha), metodo: usaGuias ? 'guia' : 'saldo'
+    };
+  }
+  const retiroNoEfectuado = vencidas.filter(r=>r.retira==='Si').map(r=>mapVencida(r,'Retiro no efectuado')).sort((a,b)=>b.diasAtraso-a.diasAtraso);
+  const despachoNoEfectuado = vencidas.filter(r=>r.despachar==='Si').map(r=>mapVencida(r,'Por despachar no efectuado')).sort((a,b)=>b.diasAtraso-a.diasAtraso);
+
+  function resumenSemanal(lista){
+    const map = {};
+    lista.forEach(r => {
+      if(!map[r.semana]) map[r.semana] = {semana:r.semana, cantidad:0, valor:0};
+      map[r.semana].cantidad++;
+      map[r.semana].valor += r.valor;
+    });
+    return Object.values(map).sort((a,b)=>{
+      // ordenar por fecha de inicio de semana (parseando el label)
+      const fa = a.semana.split(' al ')[0].split('/').reverse().join('-');
+      const fb = b.semana.split(' al ')[0].split('/').reverse().join('-');
+      return new Date(fa) - new Date(fb);
+    });
+  }
+
+  // Devoluciones: NV vigentes que tienen guías Tipo='E' (entrada/devolución) vinculadas
+  const devoluciones = [];
+  if(GUIAS_DATA && GUIAS_DATA.devoluciones){
+    const nvVigentesSet = new Set(disponibles.map(r=>String(r.nv)));
+    Object.keys(GUIAS_DATA.devoluciones).forEach(nv => {
+      if(!nvVigentesSet.has(String(nv))) return;
+      const linea = disponibles.find(r=>String(r.nv)===String(nv));
+      GUIAS_DATA.devoluciones[nv].forEach(d => {
+        devoluciones.push({nv, cliente: linea?linea.cliente:'', vendedor: linea?linea.vendedor:'', codigo:d.codigo, fecha:d.fecha, cantidad:d.cantidad, valor:d.valor});
+      });
+    });
+  }
+
+  const noEfectuados = {
+    retiro: retiroNoEfectuado,
+    despacho: despachoNoEfectuado,
+    retiroTotal: {cantidad: retiroNoEfectuado.length, valor: retiroNoEfectuado.reduce((s,r)=>s+r.valor,0)},
+    despachoTotal: {cantidad: despachoNoEfectuado.length, valor: despachoNoEfectuado.reduce((s,r)=>s+r.valor,0)},
+    retiroSemanal: resumenSemanal(retiroNoEfectuado),
+    despachoSemanal: resumenSemanal(despachoNoEfectuado),
+    devoluciones,
+    usaGuias,
+  };
+
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados };
 }
 
 /* ============================================================
@@ -1669,6 +1955,7 @@ function render(){
   if(sesion){
     renderTabsNav();
     renderProgramaDespacho();
+    renderNoEfectuados();
   }
   if(!currentVendor && RESULT.vendedoresConDatos.length){
     currentVendor = RESULT.vendedoresConDatos[0];
@@ -2191,6 +2478,7 @@ function logout(){
   if(firebaseUnsubRetenciones){ firebaseUnsubRetenciones(); firebaseUnsubRetenciones = null; }
   if(firebaseUnsubSeguimiento){ firebaseUnsubSeguimiento(); firebaseUnsubSeguimiento = null; }
   if(firebaseUnsubRoles){ firebaseUnsubRoles(); firebaseUnsubRoles = null; }
+  if(firebaseUnsubGuias){ firebaseUnsubGuias(); firebaseUnsubGuias = null; }
   document.getElementById('loginWrap').classList.remove('hidden');
   document.getElementById('mainWrap').classList.add('hidden');
   document.getElementById('sesionBar').classList.add('hidden');
@@ -2233,6 +2521,7 @@ function aplicarSesion(){
   suscribirseARetencionMotivos();
   suscribirseASeguimiento();
   suscribirseARolesConfig();
+  suscribirseAGuias();
 
   renderTabsNav();
   if(tienePermiso('accesoMaestro')){ renderUsersTable(); renderRolesConfigTable(); }
@@ -2246,13 +2535,14 @@ function tabsDisponibles(){
   if(tienePermiso('verAnalisis')) tabs.push({id:'tabAnalisis', label:'📊 Análisis'});
   if(tienePermiso('verDespacho')) tabs.push({id:'tabDespacho', label:'📅 Programa de Despacho'});
   if(tienePermiso('verProduccion')) tabs.push({id:'tabProduccion', label:'🏭 Programa de Producción'});
+  if(tienePermiso('verNoEfectuados')) tabs.push({id:'tabNoEfectuados', label:'⛔ No Efectuados'});
   if(tienePermiso('accesoMaestro')) tabs.push({id:'tabMaestro', label:'🔧 Maestro'});
   return tabs;
 }
 
 function renderTabsNav(){
   const puedeExportar = tienePermiso('exportarExcel');
-  ['btnExportAll','btnExportRetenidas','pdExportBtn','prodExportBtn'].forEach(id => {
+  ['btnExportAll','btnExportRetenidas','pdExportBtn','prodExportBtn','btnExportRetiroNoEf','btnExportDespachoNoEf'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', !puedeExportar);
   });
@@ -2273,7 +2563,7 @@ function renderTabsNav(){
 }
 
 function aplicarTabActivo(){
-  ['tabAnalisis','tabDespacho','tabProduccion','tabMaestro'].forEach(id => {
+  ['tabAnalisis','tabDespacho','tabProduccion','tabNoEfectuados','tabMaestro'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', id !== tabActivo);
   });
@@ -2575,6 +2865,96 @@ function renderProgramaDespachoTabla(){
 /* ============================================================
    Render — Programa de Producción
    ============================================================ */
+/* ============================================================
+   Render — Retiro / Despacho No Efectuado
+   ============================================================ */
+let neRetiroVendedorFiltro = '__TODOS__';
+
+function renderNoEfectuados(){
+  if(!RESULT || !RESULT.noEfectuados) return;
+  const ne = RESULT.noEfectuados;
+
+  const nota = document.getElementById('guiasEstadoNota');
+  if(ne.usaGuias){
+    nota.textContent = `✅ Usando cruce con Guías de Despacho cargadas (${GUIAS_DATA.filename||''}) — se considera cumplido si hay una guía real entre la fecha programada y hoy.`;
+  } else {
+    nota.textContent = `⚠️ Aún no se han cargado las Guías de Despacho en Maestro — por ahora se usa el Saldo pendiente del sistema como respaldo (menos preciso). Pide al Admin que cargue el archivo de guías.`;
+  }
+
+  document.getElementById('noEfectuadosCards').innerHTML = `
+    <div class="card red"><div class="label">Retiro No Efectuado</div><div class="value">${ne.retiroTotal.cantidad}</div><div class="sub">${money(ne.retiroTotal.valor)}</div></div>
+    <div class="card red"><div class="label">Por Despachar No Efectuado</div><div class="value">${ne.despachoTotal.cantidad}</div><div class="sub">${money(ne.despachoTotal.valor)}</div></div>
+    <div class="card"><div class="label">Devoluciones detectadas</div><div class="value">${ne.devoluciones.length}</div></div>
+  `;
+
+  // Filtro de vendedor para Retiro (para exportar solo a un vendedor puntual)
+  const selFiltro = document.getElementById('neRetiroVendedorFiltro');
+  if(!selFiltro.dataset.filled){
+    const vendedores = [...new Set(ne.retiro.map(r=>r.vendedor))].filter(Boolean).sort();
+    selFiltro.innerHTML = `<option value="__TODOS__">Todos los vendedores</option>` + vendedores.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    selFiltro.dataset.filled = '1';
+    selFiltro.addEventListener('change', e => { neRetiroVendedorFiltro = e.target.value; renderRetiroNoEfTable(); });
+  }
+  renderRetiroNoEfTable();
+
+  document.getElementById('despachoNoEfTable').innerHTML = tablaNoEfectuadoHtml(ne.despacho);
+
+  const semanal = [];
+  ne.retiroSemanal.forEach(s => semanal.push({...s, tipo:'Retiro'}));
+  ne.despachoSemanal.forEach(s => semanal.push({...s, tipo:'Despacho'}));
+  document.getElementById('resumenSemanalTable').innerHTML = `
+    <thead><tr><th>Semana</th><th>Tipo</th><th>Cantidad</th><th>Valor</th></tr></thead>
+    <tbody>
+      ${semanal.length ? semanal.map(s=>`<tr><td>${esc(s.semana)}</td><td>${esc(s.tipo)}</td><td>${s.cantidad}</td><td>${money(s.valor)}</td></tr>`).join('')
+        : `<tr><td colspan="4" class="empty">Sin datos de semanas con incumplimientos.</td></tr>`}
+    </tbody>`;
+
+  const devPanel = document.getElementById('devolucionesPanel');
+  if(ne.devoluciones.length){
+    devPanel.classList.remove('hidden');
+    document.getElementById('devolucionesTable').innerHTML = `
+      <thead><tr><th>NV</th><th>Cliente</th><th>Vendedor</th><th>Código</th><th>Fecha</th><th>Cantidad</th><th>Valor</th></tr></thead>
+      <tbody>${ne.devoluciones.map(d=>`<tr>
+        <td>${esc(d.nv)}</td><td>${esc(d.cliente)}</td><td>${esc(d.vendedor)}</td><td>${esc(d.codigo)}</td>
+        <td>${fmtFecha(new Date(d.fecha))}</td><td>${num(d.cantidad)}</td><td>${money(d.valor)}</td>
+      </tr>`).join('')}</tbody>`;
+  } else {
+    devPanel.classList.add('hidden');
+  }
+}
+
+function tablaNoEfectuadoHtml(rows){
+  if(!rows.length) return `<tbody><tr><td class="empty">Sin NV pendientes en esta categoría.</td></tr></tbody>`;
+  return `
+    <thead><tr><th>NV</th><th>Código</th><th>Producto</th><th>Cliente</th><th>Vendedor</th><th>Fecha Programada</th><th>Días atraso</th><th>Saldo</th><th>Valor</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr style="background:#fbe6e3;">
+        <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span></td>
+        <td>${esc(r.codigo)}</td><td>${esc(r.producto)}</td><td>${esc(r.cliente)}</td><td>${esc(r.vendedor)}</td>
+        <td>${fmtFecha(r.fechaProgramada)}</td><td><strong>${r.diasAtraso}d</strong></td>
+        <td>${num(r.saldo)}</td><td>${money(r.valor)}</td>
+      </tr>`).join('')}
+    </tbody>`;
+}
+
+function renderRetiroNoEfTable(){
+  const ne = RESULT.noEfectuados;
+  const rows = neRetiroVendedorFiltro==='__TODOS__' ? ne.retiro : ne.retiro.filter(r=>r.vendedor===neRetiroVendedorFiltro);
+  document.getElementById('retiroNoEfTable').innerHTML = tablaNoEfectuadoHtml(rows);
+}
+
+function exportarNoEfectuadoExcel(rows, nombreArchivo, hojaNombre){
+  if(!rows.length){ alert('No hay datos para exportar.'); return; }
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows.map(r=>({
+    'NV': r.nv, 'Estado NV': r.nvEstado, 'Código': r.codigo, 'Producto': r.producto,
+    'Cliente': r.cliente, 'Vendedor': r.vendedor, 'Fecha Programada': fmtFecha(r.fechaProgramada),
+    'Días de Atraso': r.diasAtraso, 'Saldo': r.saldo, 'Valor': r.valor, 'Estado': r.estado
+  })));
+  XLSX.utils.book_append_sheet(wb, ws, hojaNombre.substring(0,31));
+  XLSX.writeFile(wb, `${nombreArchivo}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 function renderProduccion(){
   document.getElementById('prodUploadWrap').classList.toggle('hidden', !tienePermiso('cargarExcelProduccion'));
   document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || tienePermiso('cargarExcelProduccion'));
@@ -3105,6 +3485,17 @@ document.getElementById('btnCerrarModalDiferencia').addEventListener('click', ()
 });
 document.getElementById('modalDesgloseDiferencia').addEventListener('click', (e) => {
   if(e.target.id === 'modalDesgloseDiferencia') document.getElementById('modalDesgloseDiferencia').classList.add('hidden');
+});
+
+document.getElementById('btnPickGuias').addEventListener('click', () => document.getElementById('fileInputGuias').click());
+document.getElementById('fileInputGuias').addEventListener('change', e => { if(e.target.files[0]) handleFileGuias(e.target.files[0]); });
+document.getElementById('btnExportRetiroNoEf').addEventListener('click', () => {
+  const ne = RESULT.noEfectuados;
+  const rows = neRetiroVendedorFiltro==='__TODOS__' ? ne.retiro : ne.retiro.filter(r=>r.vendedor===neRetiroVendedorFiltro);
+  exportarNoEfectuadoExcel(rows, 'Retiro_No_Efectuado', 'Retiro No Efectuado');
+});
+document.getElementById('btnExportDespachoNoEf').addEventListener('click', () => {
+  exportarNoEfectuadoExcel(RESULT.noEfectuados.despacho, 'Despacho_No_Efectuado', 'Despacho No Efectuado');
 });
 
 if('serviceWorker' in navigator){
