@@ -1635,7 +1635,7 @@ function procesarDatos(rows){
         cliente: k,
         programadas: {cantidad: programadas.length, valor: sumValorQprog(programadas), nvs: programadas},
         progParcial: {cantidad: progParcial.length, valor: sumValorQprog(progParcial), nvs: progParcial},
-        noProgramadas: {cantidad: noProgramadas.length, valor: sumValorQprog(noProgramadas), nvs: noProgramadas},
+        noProgramadas: {cantidad: noProgramadas.length, valor: sumValor(noProgramadas), nvs: noProgramadas},
       };
     });
     const totales = {
