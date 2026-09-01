@@ -371,6 +371,15 @@
       </div>
     </div>
 
+    <div class="panel" id="panelResumenRetail">
+      <div class="panel-head"><h2>Resumen Situación Notas de Venta Retail</h2></div>
+      <div class="panel-body pad">
+        <div class="tablewrap">
+          <table id="resumenRetailTable"></table>
+        </div>
+      </div>
+    </div>
+
     <div class="panel" id="panelDashboardVendedor">
       <div class="panel-head"><h2>Dashboard por vendedor</h2></div>
       <div class="panel-body">
@@ -1082,11 +1091,12 @@ const PERMISOS_DISPONIBLES = [
   {key:'verProgramableResumen', label:'Ver Programable — resumen cobertura por vendedor'},
   {key:'verCoberturaVendedor', label:'Ver Análisis de cobertura por vendedor'},
   {key:'verRetenidas', label:'Ver NV Retenidas por crédito'},
+  {key:'verResumenRetail', label:'Ver Resumen Situación NV Retail'},
   {key:'verNoEfectuados', label:'Ver Retiro/Despacho No Efectuado'},
 ];
 const ROLES_CONFIG_KEY = 'nvprog_roles_config_v1';
 function permisosVacios(){ const o={}; PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=false); return o; }
-const PANELES_ANALISIS = ['verResumenA','verResumenP','verDashboardVendedor','verBloqueados','verNoProgramadas','verProgramableResumen','verCoberturaVendedor','verRetenidas'];
+const PANELES_ANALISIS = ['verResumenA','verResumenP','verResumenRetail','verDashboardVendedor','verBloqueados','verNoProgramadas','verProgramableResumen','verCoberturaVendedor','verRetenidas'];
 function permisosPanelesAnalisis(valor){ const o={}; PANELES_ANALISIS.forEach(k=>o[k]=valor); return o; }
 function seedRolesConfig(){
   return {
@@ -1625,6 +1635,42 @@ function procesarDatos(rows){
   const sumValor = arr => arr.reduce((s,n)=>s+n.valorSaldo,0);
   const sumValorProgramado = arr => arr.reduce((s,n)=>s+n.valorLineasProgramadas,0);
 
+  /* -------- NV Retail: clientes CHILEMAT, MATERIALES Y SOLUCIONES, SODIMAC, EASY, CONSTRUMART -------- */
+  const RETAIL_CLIENTES = ['CHILEMAT','MATERIALES Y SOLUCIONES','SODIMAC','EASY','CONSTRUMART'];
+  function clienteRetail(nombreCliente){
+    if(!nombreCliente) return null;
+    const up = String(nombreCliente).toUpperCase();
+    return RETAIL_CLIENTES.find(k => up.includes(k)) || null;
+  }
+  const nvRetail = nvList.map(n => ({...n, retailKey: clienteRetail(n.cliente)})).filter(n => n.retailKey);
+  const retailPorCliente = RETAIL_CLIENTES.map(k => {
+    const deEsteCliente = nvRetail.filter(n => n.retailKey === k);
+    const programadas = deEsteCliente.filter(n => n.estadoProg === 'Programada');
+    const progParcial = deEsteCliente.filter(n => n.estadoProg === 'Prog. Parcial');
+    const noProgramadas = deEsteCliente.filter(n => n.estadoProg === 'No programada');
+    return {
+      cliente: k,
+      programadas: {cantidad: programadas.length, valor: sumValor(programadas)},
+      progParcial: {cantidad: progParcial.length, valor: sumValor(progParcial)},
+      noProgramadas: {cantidad: noProgramadas.length, valor: sumValor(noProgramadas)},
+    };
+  });
+  const retailTotales = {
+    programadas: {
+      cantidad: retailPorCliente.reduce((s,c)=>s+c.programadas.cantidad,0),
+      valor: retailPorCliente.reduce((s,c)=>s+c.programadas.valor,0)
+    },
+    progParcial: {
+      cantidad: retailPorCliente.reduce((s,c)=>s+c.progParcial.cantidad,0),
+      valor: retailPorCliente.reduce((s,c)=>s+c.progParcial.valor,0)
+    },
+    noProgramadas: {
+      cantidad: retailPorCliente.reduce((s,c)=>s+c.noProgramadas.cantidad,0),
+      valor: retailPorCliente.reduce((s,c)=>s+c.noProgramadas.valor,0)
+    }
+  };
+  const resumenRetail = {porCliente: retailPorCliente, totales: retailTotales};
+
   const dashboard = {
     totalNV: nvList.length,
     totalValor: sumValor(nvList),
@@ -1951,7 +1997,7 @@ function procesarDatos(rows){
     usaGuias,
   };
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados };
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetail };
 }
 
 /* ============================================================
@@ -1959,7 +2005,7 @@ function procesarDatos(rows){
    ============================================================ */
 function aplicarPermisosPanelesAnalisis(){
   const mapa = {
-    panelResumenA:'verResumenA', panelResumenP:'verResumenP',
+    panelResumenA:'verResumenA', panelResumenP:'verResumenP', panelResumenRetail:'verResumenRetail',
     panelDashboardVendedor:'verDashboardVendedor', panelNoProgramadas:'verNoProgramadas',
     panelProgramableResumen:'verProgramableResumen', panelCoberturaVendedor:'verCoberturaVendedor',
     panelRetenidas:'verRetenidas'
@@ -1977,6 +2023,7 @@ function render(){
   renderDashCards();
   renderGraficosDashboard();
   renderResumenSituacion();
+  renderResumenRetail();
   renderDashVendorTable();
   renderBloqueados();
   renderNoProgramadas();
@@ -2011,6 +2058,10 @@ function renderDashCards(){
     {label:'Retenidas (crédito)', value: d.retenidas, cls: d.retenidas?'red':'', sub: `${money(d.retenidasValor)} · Retira: ${d.retenidasRetira} (${money(d.retenidasRetiraValor)}) · Despacho: ${d.retenidasDespacho} (${money(d.retenidasDespachoValor)})`},
     {label:'Bloqueadas', value: d.bloqueadas, cls: d.bloqueadas?'red':'', sub: money(d.bloqueadasValor)},
   ];
+  const rr = RESULT.resumenRetail.totales;
+  const retailCantidad = rr.programadas.cantidad + rr.progParcial.cantidad + rr.noProgramadas.cantidad;
+  const retailValor = rr.programadas.valor + rr.progParcial.valor + rr.noProgramadas.valor;
+  cards.push({label:'NV Retail', value: retailCantidad, cls:'blue', sub:`${money(retailValor)} · Programadas: ${rr.programadas.cantidad} (${money(rr.programadas.valor)}) · Prog. Parcial: ${rr.progParcial.cantidad} (${money(rr.progParcial.valor)}) · No programadas: ${rr.noProgramadas.cantidad} (${money(rr.noProgramadas.valor)})`});
   document.getElementById('dashCards').innerHTML = cards.map(c => `
     <div class="card ${c.cls||''}">
       <div class="label">${esc(c.label)}</div>
@@ -2164,6 +2215,27 @@ function abrirModalDiferencia(estadoLabel, r){
   document.getElementById('sinMotivoFootnote').textContent = `${sinMotivo.length} NV sin motivo registrado (con valorización real) · ${money(sinMotivo.reduce((s,n)=>s+n.valorSaldo,0))}`;
 
   document.getElementById('modalDesgloseDiferencia').classList.remove('hidden');
+}
+
+function renderResumenRetail(){
+  const r = RESULT.resumenRetail;
+  const filas = r.porCliente.map(c => `<tr>
+    <td>${esc(c.cliente)}</td>
+    <td>${c.programadas.cantidad} <span style="color:var(--steel); font-size:11px;">(${money(c.programadas.valor)})</span></td>
+    <td>${c.progParcial.cantidad} <span style="color:var(--steel); font-size:11px;">(${money(c.progParcial.valor)})</span></td>
+    <td>${c.noProgramadas.cantidad} <span style="color:var(--steel); font-size:11px;">(${money(c.noProgramadas.valor)})</span></td>
+  </tr>`).join('');
+  document.getElementById('resumenRetailTable').innerHTML = `
+    <thead><tr><th>Clientes</th><th>Programadas</th><th>Prog. Parcial</th><th>No Programadas</th></tr></thead>
+    <tbody>
+      ${filas}
+      <tr class="totalrow">
+        <td>TOTALES</td>
+        <td>${r.totales.programadas.cantidad} (${money(r.totales.programadas.valor)})</td>
+        <td>${r.totales.progParcial.cantidad} (${money(r.totales.progParcial.valor)})</td>
+        <td>${r.totales.noProgramadas.cantidad} (${money(r.totales.noProgramadas.valor)})</td>
+      </tr>
+    </tbody>`;
 }
 
 function renderResumenSituacion(){
