@@ -399,37 +399,7 @@
       </div>
     </div>
 
-    <div class="panel" id="panelNoProgramadas">
-      <div class="panel-head">
-        <h2>NV No Programadas — detalle por tipo y motivo</h2>
-      </div>
-      <div class="seg" id="noProgSeg">
-        <button data-tipo="Todos" class="active">Todos</button>
-        <button data-tipo="Retira Cliente">Retira Cliente</button>
-        <button data-tipo="Por Despachar">Por Despachar</button>
-      </div>
-      <div class="panel-body">
-        <div class="tablewrap">
-          <table id="noProgTable"></table>
-        </div>
-      </div>
-      <div class="assumption-note">Motivo = valores de la columna OPERACIÓN de las líneas de esa NV (excluyendo "0"/vacío). Si una NV tiene líneas con motivos distintos, se listan todos separados por "/".</div>
-    </div>
-
     <div class="section-title" id="programableSectionTitle">Programable — cobertura de stock disponible</div>
-
-    <div class="panel" id="panelProgramableResumen">
-      <div class="panel-head">
-        <h2>Resumen de cobertura por vendedor</h2>
-        <button class="btn btn-export" id="btnExportAll">⬇ Descargar Excel completo</button>
-      </div>
-      <div class="panel-body">
-        <div class="tablewrap">
-          <table id="resumenVendedorTable"></table>
-        </div>
-      </div>
-      <div class="assumption-note">Solo entran a este análisis las líneas AÚN NO programadas (las programadas ya están descontadas del stock vía QPROG). El stock disponible de cada código se reparte primero entre Por Despachar no programadas (por fecha) y luego, con lo que sobra, entre Retira Cliente no programadas (por fecha).</div>
-    </div>
 
     <div class="panel" id="panelCoberturaVendedor">
       <div class="panel-head"><h2>Análisis de cobertura por vendedor</h2></div>
@@ -1087,8 +1057,6 @@ const PERMISOS_DISPONIBLES = [
   {key:'verResumenP', label:'Ver Resumen Situación — Pendientes (P)'},
   {key:'verDashboardVendedor', label:'Ver Dashboard por vendedor'},
   {key:'verBloqueados', label:'Ver Clientes bloqueados'},
-  {key:'verNoProgramadas', label:'Ver NV No Programadas — detalle'},
-  {key:'verProgramableResumen', label:'Ver Programable — resumen cobertura por vendedor'},
   {key:'verCoberturaVendedor', label:'Ver Análisis de cobertura por vendedor'},
   {key:'verRetenidas', label:'Ver NV Retenidas por crédito'},
   {key:'verResumenRetail', label:'Ver Resumen Situación NV Retail'},
@@ -1096,7 +1064,7 @@ const PERMISOS_DISPONIBLES = [
 ];
 const ROLES_CONFIG_KEY = 'nvprog_roles_config_v1';
 function permisosVacios(){ const o={}; PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=false); return o; }
-const PANELES_ANALISIS = ['verResumenA','verResumenP','verResumenRetail','verDashboardVendedor','verBloqueados','verNoProgramadas','verProgramableResumen','verCoberturaVendedor','verRetenidas'];
+const PANELES_ANALISIS = ['verResumenA','verResumenP','verResumenRetail','verDashboardVendedor','verBloqueados','verCoberturaVendedor','verRetenidas'];
 function permisosPanelesAnalisis(valor){ const o={}; PANELES_ANALISIS.forEach(k=>o[k]=valor); return o; }
 function seedRolesConfig(){
   return {
@@ -2006,8 +1974,7 @@ function procesarDatos(rows){
 function aplicarPermisosPanelesAnalisis(){
   const mapa = {
     panelResumenA:'verResumenA', panelResumenP:'verResumenP', panelResumenRetail:'verResumenRetail',
-    panelDashboardVendedor:'verDashboardVendedor', panelNoProgramadas:'verNoProgramadas',
-    panelProgramableResumen:'verProgramableResumen', panelCoberturaVendedor:'verCoberturaVendedor',
+    panelDashboardVendedor:'verDashboardVendedor', panelCoberturaVendedor:'verCoberturaVendedor',
     panelRetenidas:'verRetenidas'
   };
   Object.keys(mapa).forEach(id => {
@@ -2015,7 +1982,7 @@ function aplicarPermisosPanelesAnalisis(){
     if(el) el.classList.toggle('hidden', !tienePermiso(mapa[id]));
   });
   const tituloSeccion = document.getElementById('programableSectionTitle');
-  if(tituloSeccion) tituloSeccion.classList.toggle('hidden', !tienePermiso('verProgramableResumen') && !tienePermiso('verCoberturaVendedor'));
+  if(tituloSeccion) tituloSeccion.classList.toggle('hidden', !tienePermiso('verCoberturaVendedor'));
 }
 
 function render(){
@@ -2026,8 +1993,6 @@ function render(){
   renderResumenRetail();
   renderDashVendorTable();
   renderBloqueados();
-  renderNoProgramadas();
-  renderResumenVendedor();
   renderTabs();
   renderRetenidas();
   aplicarPermisosPanelesAnalisis();
@@ -2348,63 +2313,6 @@ function renderBloqueados(){
     </tbody>`;
 }
 
-function renderNoProgramadas(){
-  document.querySelectorAll('#noProgSeg button').forEach(b=>{
-    b.classList.toggle('active', b.getAttribute('data-tipo')===currentNoProgTipo);
-    b.onclick = () => { currentNoProgTipo = b.getAttribute('data-tipo'); renderNoProgramadas(); };
-  });
-
-  const all = RESULT.noProgramadasNV;
-  const rows = currentNoProgTipo==='Todos' ? all : all.filter(n=>n.tipo===currentNoProgTipo);
-  const sorted = [...rows].sort((a,b)=> (a.vendedor||'').localeCompare(b.vendedor||'') || (a.nv-b.nv));
-
-  if(!sorted.length){
-    document.getElementById('noProgTable').innerHTML = `<tbody><tr><td class="empty">No hay NV sin programar en esta categoría.</td></tr></tbody>`;
-    return;
-  }
-  document.getElementById('noProgTable').innerHTML = `
-    <thead><tr>
-      <th>NV</th><th>Fecha</th><th>Tipo</th><th>Vendedor</th><th>Cliente</th><th>Motivo (Operación)</th><th>Retenida</th><th>Bloqueada</th>
-    </tr></thead>
-    <tbody>
-      ${sorted.map(n=>`<tr>
-        <td>${esc(n.nv)}<span class="tag tag-${n.nvEstado}">${esc(n.nvEstado)}</span></td>
-        <td>${fmtFecha(n.fecha)}</td>
-        <td><span class="badge ${n.tipo==='Retira Cliente'?'badge-retira':'badge-despacha'}">${esc(n.tipo)}</span></td>
-        <td>${esc(n.vendedor)}</td>
-        <td>${esc(n.cliente)}</td>
-        <td>${esc(n.motivo || 'Sin motivo registrado')}</td>
-        <td>${n.retenida==='Si' ? '<span class="badge badge-bloq">Sí</span>' : '-'}</td>
-        <td>${n.bloqueado==='S' ? '<span class="badge badge-bloq">Sí</span>' : '-'}</td>
-      </tr>`).join('')}
-    </tbody>`;
-}
-
-function renderResumenVendedor(){
-  const rows = RESULT.resumenPorTipo[currentTipo] || [];
-  const totalCub = rows.reduce((s,r)=>s+r.valorCubierto,0);
-  const totalSin = rows.reduce((s,r)=>s+r.valorSinCubrir,0);
-  document.getElementById('resumenVendedorTable').innerHTML = `
-    <thead><tr>
-      <th>Vendedor</th><th>NV total (${esc(currentTipo)})</th><th>Completas</th><th>Parciales</th><th>Sin cobertura</th>
-      <th>Valor cubierto</th><th>Valor sin cubrir</th>
-    </tr></thead>
-    <tbody>
-      ${rows.map(r=>`<tr>
-        <td>${esc(r.vendedor)}</td><td>${r.nvTotal}</td>
-        <td>${r.completo}</td><td>${r.parcial}</td><td>${r.noCubre}</td>
-        <td>${money(r.valorCubierto)}</td><td>${money(r.valorSinCubrir)}</td>
-      </tr>`).join('')}
-      <tr class="totalrow">
-        <td>TOTAL GENERAL</td><td>${rows.reduce((s,r)=>s+r.nvTotal,0)}</td>
-        <td>${rows.reduce((s,r)=>s+r.completo,0)}</td>
-        <td>${rows.reduce((s,r)=>s+r.parcial,0)}</td>
-        <td>${rows.reduce((s,r)=>s+r.noCubre,0)}</td>
-        <td>${money(totalCub)}</td><td>${money(totalSin)}</td>
-      </tr>
-    </tbody>`;
-}
-
 function renderTabs(){
   const tabsEl = document.getElementById('vendorTabs');
   const resumen = RESULT.resumenPorTipo[currentTipo] || [];
@@ -2679,7 +2587,7 @@ function tabsDisponibles(){
 
 function renderTabsNav(){
   const puedeExportar = tienePermiso('exportarExcel');
-  ['btnExportAll','btnExportRetenidas','pdExportBtn','prodExportBtn','btnExportRetiroNoEf','btnExportDespachoNoEf'].forEach(id => {
+  ['btnExportRetenidas','pdExportBtn','prodExportBtn','btnExportRetiroNoEf','btnExportDespachoNoEf'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', !puedeExportar);
   });
@@ -3594,7 +3502,6 @@ document.getElementById('fileInput').addEventListener('change', e => { if(e.targ
 ['dragleave','drop'].forEach(ev => uploadbox.addEventListener(ev, e => { e.preventDefault(); uploadbox.classList.remove('drag'); }));
 uploadbox.addEventListener('drop', e => { if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
 
-document.getElementById('btnExportAll').addEventListener('click', exportAllExcel);
 document.getElementById('searchBox').addEventListener('input', e => { currentSearch = e.target.value; renderVendorTable(); });
 
 document.getElementById('btnPickProd').addEventListener('click', () => document.getElementById('fileInputProd').click());
