@@ -371,11 +371,20 @@
       </div>
     </div>
 
-    <div class="panel" id="panelResumenRetail">
-      <div class="panel-head"><h2>Resumen Situación Notas de Venta Retail</h2></div>
+    <div class="panel" id="panelResumenRetailA">
+      <div class="panel-head"><h2>Resumen Situación Notas de Venta Retail — Aprobadas (A)</h2></div>
       <div class="panel-body pad">
         <div class="tablewrap">
-          <table id="resumenRetailTable"></table>
+          <table id="resumenRetailTableA"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panelResumenRetailP">
+      <div class="panel-head"><h2>Resumen Situación Notas de Venta Retail — Pendientes (P)</h2></div>
+      <div class="panel-body pad">
+        <div class="tablewrap">
+          <table id="resumenRetailTableP"></table>
         </div>
       </div>
     </div>
@@ -645,7 +654,7 @@ try{
 /* Solo se guardan/sincronizan las columnas que la app realmente usa,
    para mantenerse bajo el límite de 1MB por documento de Firestore. */
 const COLUMNAS_UTILES = ['fecha_emis','Numero_NVenta','nvEstado','CodAux','NomAux','Bloqueado','VenDes',
-  'CodProd','DesProd','CodUMed','Saldo','Saldo$','QPROG','FPROG','Stock_2','Retira','Despachar',
+  'CodProd','DesProd','CodUMed','Saldo','Saldo$','QPROG','QPROGVAL','FPROG','Stock_2','Retira','Despachar',
   'Retenida_Credito','Comuna_despacho','OPERACIÓN','NumOC'];
 function trimirFilas(rows){
   return rows
@@ -1045,6 +1054,7 @@ const CODIGOS_EXCLUIDOS = ['999','9999999998'];
    ============================================================ */
 const PERMISOS_DISPONIBLES = [
   {key:'verAnalisis', label:'Ver pestaña Análisis'},
+  {key:'verAnalisisPropio', label:'Ver Análisis propio (tarjetas y gráficos filtrados a sus NV)'},
   {key:'verDespacho', label:'Ver Programa de Despacho'},
   {key:'verProduccion', label:'Ver Programa de Producción'},
   {key:'verTodasNV', label:'Ver TODAS las NV en Despacho (no solo las propias)'},
@@ -1059,12 +1069,13 @@ const PERMISOS_DISPONIBLES = [
   {key:'verBloqueados', label:'Ver Clientes bloqueados'},
   {key:'verCoberturaVendedor', label:'Ver Análisis de cobertura por vendedor'},
   {key:'verRetenidas', label:'Ver NV Retenidas por crédito'},
-  {key:'verResumenRetail', label:'Ver Resumen Situación NV Retail'},
+  {key:'verResumenRetailA', label:'Ver Resumen Situación NV Retail — Aprobadas (A)'},
+  {key:'verResumenRetailP', label:'Ver Resumen Situación NV Retail — Pendientes (P)'},
   {key:'verNoEfectuados', label:'Ver Retiro/Despacho No Efectuado'},
 ];
 const ROLES_CONFIG_KEY = 'nvprog_roles_config_v1';
 function permisosVacios(){ const o={}; PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=false); return o; }
-const PANELES_ANALISIS = ['verResumenA','verResumenP','verResumenRetail','verDashboardVendedor','verBloqueados','verCoberturaVendedor','verRetenidas'];
+const PANELES_ANALISIS = ['verResumenA','verResumenP','verResumenRetailA','verResumenRetailP','verDashboardVendedor','verBloqueados','verCoberturaVendedor','verRetenidas'];
 function permisosPanelesAnalisis(valor){ const o={}; PANELES_ANALISIS.forEach(k=>o[k]=valor); return o; }
 function seedRolesConfig(){
   return {
@@ -1503,6 +1514,7 @@ function procesarDatos(rows){
     saldo: Number(r['Saldo'])||0,
     saldoValor: Number(r['Saldo$'])||0,
     qprog: Number(r['QPROG'])||0,
+    qprogValor: Number(r['QPROGVAL'])||0,
     fprog: Number(r['FPROG'])||0,
     fprogFecha: excelSerialToDate(r['FPROG']),
     programada: excelSerialToDate(r['FPROG']) !== null,
@@ -1529,12 +1541,13 @@ function procesarDatos(rows){
       nvMap[r.nv] = {
         nv:r.nv, nvEstado:r.nvEstado, vendedor:r.vendedor, cliente:r.cliente, fecha:r.fecha_dt,
         bloqueado:r.bloqueado, retenida:r.retenida, retira:r.retira, despachar:r.despachar,
-        lineasTotal:0, lineasProgramadas:0, motivos:new Set(), valorSaldo:0, valorLineasProgramadas:0
+        lineasTotal:0, lineasProgramadas:0, motivos:new Set(), valorSaldo:0, valorLineasProgramadas:0, valorQprog:0
       };
     }
     nvMap[r.nv].lineasTotal++;
     if(r.programada){ nvMap[r.nv].lineasProgramadas++; nvMap[r.nv].valorLineasProgramadas += r.saldoValor; }
     nvMap[r.nv].valorSaldo += r.saldoValor;
+    nvMap[r.nv].valorQprog += r.qprogValor;
     const op = (r.operacion===undefined||r.operacion===null) ? '' : String(r.operacion).trim();
     if(op && op!=='0') nvMap[r.nv].motivos.add(op);
   });
@@ -1602,6 +1615,7 @@ function procesarDatos(rows){
 
   const sumValor = arr => arr.reduce((s,n)=>s+n.valorSaldo,0);
   const sumValorProgramado = arr => arr.reduce((s,n)=>s+n.valorLineasProgramadas,0);
+  const sumValorQprog = arr => arr.reduce((s,n)=>s+n.valorQprog,0);
 
   /* -------- NV Retail: clientes CHILEMAT, MATERIALES Y SOLUCIONES, SODIMAC, EASY, CONSTRUMART -------- */
   const RETAIL_CLIENTES = ['CHILEMAT','MATERIALES Y SOLUCIONES','SODIMAC','EASY','CONSTRUMART'];
@@ -1610,34 +1624,38 @@ function procesarDatos(rows){
     const up = String(nombreCliente).toUpperCase();
     return RETAIL_CLIENTES.find(k => up.includes(k)) || null;
   }
-  const nvRetail = nvList.map(n => ({...n, retailKey: clienteRetail(n.cliente)})).filter(n => n.retailKey);
-  const retailPorCliente = RETAIL_CLIENTES.map(k => {
-    const deEsteCliente = nvRetail.filter(n => n.retailKey === k);
-    const programadas = deEsteCliente.filter(n => n.estadoProg === 'Programada');
-    const progParcial = deEsteCliente.filter(n => n.estadoProg === 'Prog. Parcial');
-    const noProgramadas = deEsteCliente.filter(n => n.estadoProg === 'No programada');
-    return {
-      cliente: k,
-      programadas: {cantidad: programadas.length, valor: sumValor(programadas), nvs: programadas},
-      progParcial: {cantidad: progParcial.length, valor: sumValor(progParcial), nvs: progParcial},
-      noProgramadas: {cantidad: noProgramadas.length, valor: sumValor(noProgramadas), nvs: noProgramadas},
+  function construirResumenRetail(nvSubconjunto){
+    const nvRetail = nvSubconjunto.map(n => ({...n, retailKey: clienteRetail(n.cliente)})).filter(n => n.retailKey);
+    const porCliente = RETAIL_CLIENTES.map(k => {
+      const deEsteCliente = nvRetail.filter(n => n.retailKey === k);
+      const programadas = deEsteCliente.filter(n => n.estadoProg === 'Programada');
+      const progParcial = deEsteCliente.filter(n => n.estadoProg === 'Prog. Parcial');
+      const noProgramadas = deEsteCliente.filter(n => n.estadoProg === 'No programada');
+      return {
+        cliente: k,
+        programadas: {cantidad: programadas.length, valor: sumValorQprog(programadas), nvs: programadas},
+        progParcial: {cantidad: progParcial.length, valor: sumValorQprog(progParcial), nvs: progParcial},
+        noProgramadas: {cantidad: noProgramadas.length, valor: sumValorQprog(noProgramadas), nvs: noProgramadas},
+      };
+    });
+    const totales = {
+      programadas: {
+        cantidad: porCliente.reduce((s,c)=>s+c.programadas.cantidad,0),
+        valor: porCliente.reduce((s,c)=>s+c.programadas.valor,0)
+      },
+      progParcial: {
+        cantidad: porCliente.reduce((s,c)=>s+c.progParcial.cantidad,0),
+        valor: porCliente.reduce((s,c)=>s+c.progParcial.valor,0)
+      },
+      noProgramadas: {
+        cantidad: porCliente.reduce((s,c)=>s+c.noProgramadas.cantidad,0),
+        valor: porCliente.reduce((s,c)=>s+c.noProgramadas.valor,0)
+      }
     };
-  });
-  const retailTotales = {
-    programadas: {
-      cantidad: retailPorCliente.reduce((s,c)=>s+c.programadas.cantidad,0),
-      valor: retailPorCliente.reduce((s,c)=>s+c.programadas.valor,0)
-    },
-    progParcial: {
-      cantidad: retailPorCliente.reduce((s,c)=>s+c.progParcial.cantidad,0),
-      valor: retailPorCliente.reduce((s,c)=>s+c.progParcial.valor,0)
-    },
-    noProgramadas: {
-      cantidad: retailPorCliente.reduce((s,c)=>s+c.noProgramadas.cantidad,0),
-      valor: retailPorCliente.reduce((s,c)=>s+c.noProgramadas.valor,0)
-    }
-  };
-  const resumenRetail = {porCliente: retailPorCliente, totales: retailTotales};
+    return {porCliente, totales};
+  }
+  const resumenRetailA = construirResumenRetail(nvList.filter(n=>n.nvEstado==='A'));
+  const resumenRetailP = construirResumenRetail(nvList.filter(n=>n.nvEstado==='P'));
 
   const dashboard = {
     totalNV: nvList.length,
@@ -1683,17 +1701,27 @@ function procesarDatos(rows){
     const v = n.vendedor || '(sin vendedor)';
     if(!porVendedorMap[v]) porVendedorMap[v] = {
       vendedor:v, total:0, totalValor:0, aprobadas:0, aprobadasValor:0, pendientes:0, pendientesValor:0,
-      programadas:0, programadasValor:0, progParcial:0, progParcialValor:0,
+      programadas:0, programadasValor:0, programadasRetira:0, programadasRetiraValor:0, programadasDespacho:0, programadasDespachoValor:0,
+      progParcial:0, progParcialValor:0, progParcialRetira:0, progParcialRetiraValor:0, progParcialDespacho:0, progParcialDespachoValor:0,
       noProgramadas:0, noProgramadasValor:0, noProgRetira:0, noProgRetiraValor:0, noProgDespacho:0, noProgDespachoValor:0,
       retiraCliente:0, retiraClienteValor:0, porDespachar:0, porDespacharValor:0,
-      retenidas:0, retenidasValor:0, bloqueadas:0, bloqueadasValor:0
+      retenidas:0, retenidasValor:0, retenidasRetira:0, retenidasRetiraValor:0, retenidasDespacho:0, retenidasDespachoValor:0,
+      bloqueadas:0, bloqueadasValor:0
     };
     const p = porVendedorMap[v];
     p.total++; p.totalValor += n.valorSaldo;
     if(n.nvEstado==='A'){ p.aprobadas++; p.aprobadasValor += n.valorSaldo; }
     else if(n.nvEstado==='P'){ p.pendientes++; p.pendientesValor += n.valorSaldo; }
-    if(n.estadoProg==='Programada'){ p.programadas++; p.programadasValor += n.valorLineasProgramadas; }
-    else if(n.estadoProg==='Prog. Parcial'){ p.progParcial++; p.progParcialValor += n.valorLineasProgramadas; }
+    if(n.estadoProg==='Programada'){
+      p.programadas++; p.programadasValor += n.valorLineasProgramadas;
+      if(n.tipo==='Retira Cliente'){ p.programadasRetira++; p.programadasRetiraValor += n.valorLineasProgramadas; }
+      else if(n.tipo==='Por Despachar'){ p.programadasDespacho++; p.programadasDespachoValor += n.valorLineasProgramadas; }
+    }
+    else if(n.estadoProg==='Prog. Parcial'){
+      p.progParcial++; p.progParcialValor += n.valorLineasProgramadas;
+      if(n.tipo==='Retira Cliente'){ p.progParcialRetira++; p.progParcialRetiraValor += n.valorLineasProgramadas; }
+      else if(n.tipo==='Por Despachar'){ p.progParcialDespacho++; p.progParcialDespachoValor += n.valorLineasProgramadas; }
+    }
     else {
       p.noProgramadas++; p.noProgramadasValor += n.valorSaldo;
       if(n.tipo==='Retira Cliente'){ p.noProgRetira++; p.noProgRetiraValor += n.valorSaldo; }
@@ -1701,7 +1729,11 @@ function procesarDatos(rows){
     }
     if(n.retira==='Si'){ p.retiraCliente++; p.retiraClienteValor += n.valorSaldo; }
     if(n.despachar==='Si'){ p.porDespachar++; p.porDespacharValor += n.valorSaldo; }
-    if(n.retenida==='Si'){ p.retenidas++; p.retenidasValor += n.valorSaldo; }
+    if(n.retenida==='Si'){
+      p.retenidas++; p.retenidasValor += n.valorSaldo;
+      if(n.tipo==='Retira Cliente'){ p.retenidasRetira++; p.retenidasRetiraValor += n.valorSaldo; }
+      else if(n.tipo==='Por Despachar'){ p.retenidasDespacho++; p.retenidasDespachoValor += n.valorSaldo; }
+    }
     if(n.bloqueado==='S'){ p.bloqueadas++; p.bloqueadasValor += n.valorSaldo; }
   });
   const dashboardPorVendedor = Object.values(porVendedorMap).sort((a,b)=>b.total-a.total);
@@ -1965,7 +1997,7 @@ function procesarDatos(rows){
     usaGuias,
   };
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetail };
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion };
 }
 
 /* ============================================================
@@ -1973,7 +2005,7 @@ function procesarDatos(rows){
    ============================================================ */
 function aplicarPermisosPanelesAnalisis(){
   const mapa = {
-    panelResumenA:'verResumenA', panelResumenP:'verResumenP', panelResumenRetail:'verResumenRetail',
+    panelResumenA:'verResumenA', panelResumenP:'verResumenP', panelResumenRetailA:'verResumenRetailA', panelResumenRetailP:'verResumenRetailP',
     panelDashboardVendedor:'verDashboardVendedor', panelCoberturaVendedor:'verCoberturaVendedor',
     panelRetenidas:'verRetenidas'
   };
@@ -2007,8 +2039,30 @@ function render(){
   renderVendorPanel();
 }
 
+function dashboardParaVendedorActual(){
+  const nombres = (sesion && sesion.vendedores) || [];
+  const filas = RESULT.dashboardPorVendedor.filter(p => nombres.includes(p.vendedor));
+  const campos = ['total','totalValor','aprobadas','aprobadasValor','pendientes','pendientesValor',
+    'programadas','programadasValor','programadasRetira','programadasRetiraValor','programadasDespacho','programadasDespachoValor',
+    'progParcial','progParcialValor','progParcialRetira','progParcialRetiraValor','progParcialDespacho','progParcialDespachoValor',
+    'noProgramadas','noProgramadasValor','noProgRetira','noProgRetiraValor','noProgDespacho','noProgDespachoValor',
+    'retiraCliente','retiraClienteValor','porDespachar','porDespacharValor',
+    'retenidas','retenidasValor','retenidasRetira','retenidasRetiraValor','retenidasDespacho','retenidasDespachoValor',
+    'bloqueadas','bloqueadasValor','sinStockRetira','sinStockRetiraValor','sinStockDespacho','sinStockDespachoValor',
+    'otrosMotivosRetira','otrosMotivosRetiraValor','otrosMotivosDespacho','otrosMotivosDespachoValor'];
+  const d = {};
+  campos.forEach(c => { d[c] = filas.reduce((s,p)=>s+(p[c]||0),0); });
+  d.totalNV = d.total;
+  d.sinStockTotal = d.sinStockRetira + d.sinStockDespacho;
+  d.sinStockTotalValor = d.sinStockRetiraValor + d.sinStockDespachoValor;
+  d.otrosMotivosTotal = d.otrosMotivosRetira + d.otrosMotivosDespacho;
+  d.otrosMotivosTotalValor = d.otrosMotivosRetiraValor + d.otrosMotivosDespachoValor;
+  return d;
+}
+
 function renderDashCards(){
-  const d = RESULT.dashboard;
+  const esPropio = !tienePermiso('verAnalisis') && tienePermiso('verAnalisisPropio');
+  const d = esPropio ? dashboardParaVendedorActual() : RESULT.dashboard;
   const cards = [
     {label:'NV totales (A/P)', value: d.totalNV, sub: money(d.totalValor)},
     {label:'Aprobadas', value: d.aprobadas, cls:'blue', sub: money(d.aprobadasValor)},
@@ -2023,10 +2077,16 @@ function renderDashCards(){
     {label:'Retenidas (crédito)', value: d.retenidas, cls: d.retenidas?'red':'', sub: `${money(d.retenidasValor)} · Retira: ${d.retenidasRetira} (${money(d.retenidasRetiraValor)}) · Despacho: ${d.retenidasDespacho} (${money(d.retenidasDespachoValor)})`},
     {label:'Bloqueadas', value: d.bloqueadas, cls: d.bloqueadas?'red':'', sub: money(d.bloqueadasValor)},
   ];
-  const rr = RESULT.resumenRetail.totales;
+  if(!esPropio){
+  const combinarRetail = (cat) => ({
+    cantidad: RESULT.resumenRetailA.totales[cat].cantidad + RESULT.resumenRetailP.totales[cat].cantidad,
+    valor: RESULT.resumenRetailA.totales[cat].valor + RESULT.resumenRetailP.totales[cat].valor
+  });
+  const rr = {programadas: combinarRetail('programadas'), progParcial: combinarRetail('progParcial'), noProgramadas: combinarRetail('noProgramadas')};
   const retailCantidad = rr.programadas.cantidad + rr.progParcial.cantidad + rr.noProgramadas.cantidad;
   const retailValor = rr.programadas.valor + rr.progParcial.valor + rr.noProgramadas.valor;
   cards.push({label:'NV Retail', value: retailCantidad, cls:'blue', sub:`${money(retailValor)} · Programadas: ${rr.programadas.cantidad} (${money(rr.programadas.valor)}) · Prog. Parcial: ${rr.progParcial.cantidad} (${money(rr.progParcial.valor)}) · No programadas: ${rr.noProgramadas.cantidad} (${money(rr.noProgramadas.valor)})`});
+  }
   document.getElementById('dashCards').innerHTML = cards.map(c => `
     <div class="card ${c.cls||''}">
       <div class="label">${esc(c.label)}</div>
@@ -2118,15 +2178,23 @@ function exportarMotivoExcel(resumen, motivo, estadoLabel){
 }
 
 function renderGraficosDashboard(){
-  renderPieResumen('pieResumenA', 'pieResumenALegend', RESULT.resumenSituacionA);
-  renderPieResumen('pieResumenP', 'pieResumenPLegend', RESULT.resumenSituacionP);
-  renderPieMotivos('pieMotivosA', 'pieMotivosALegend', RESULT.resumenSituacionA, {
+  const esPropio = !tienePermiso('verAnalisis') && tienePermiso('verAnalisisPropio');
+  let rA = RESULT.resumenSituacionA, rP = RESULT.resumenSituacionP;
+  if(esPropio){
+    const nombres = (sesion && sesion.vendedores) || [];
+    const nvVendedor = RESULT.nvList.filter(n => nombres.includes(n.vendedor));
+    rA = RESULT.construirResumenSituacion(nvVendedor.filter(n=>n.nvEstado==='A'));
+    rP = RESULT.construirResumenSituacion(nvVendedor.filter(n=>n.nvEstado==='P'));
+  }
+  renderPieResumen('pieResumenA', 'pieResumenALegend', rA);
+  renderPieResumen('pieResumenP', 'pieResumenPLegend', rP);
+  renderPieMotivos('pieMotivosA', 'pieMotivosALegend', rA, {
     descargables: tienePermiso('exportarExcel'),
-    onDescargar: (motivo) => exportarMotivoExcel(RESULT.resumenSituacionA, motivo, 'Aprobadas')
+    onDescargar: (motivo) => exportarMotivoExcel(rA, motivo, 'Aprobadas')
   });
-  renderPieMotivos('pieMotivosP', 'pieMotivosPLegend', RESULT.resumenSituacionP, {
+  renderPieMotivos('pieMotivosP', 'pieMotivosPLegend', rP, {
     descargables: tienePermiso('exportarExcel'),
-    onDescargar: (motivo) => exportarMotivoExcel(RESULT.resumenSituacionP, motivo, 'Pendientes')
+    onDescargar: (motivo) => exportarMotivoExcel(rP, motivo, 'Pendientes')
   });
 }
 
@@ -2182,23 +2250,21 @@ function abrirModalDiferencia(estadoLabel, r){
   document.getElementById('modalDesgloseDiferencia').classList.remove('hidden');
 }
 
-function celdaRetailHtml(cliente, categoria, datos){
-  const btnId = `retailDl_${cliente.replace(/[^a-zA-Z0-9]/g,'_')}_${categoria}`;
+function celdaRetailHtml(cliente, categoria, datos, estado){
   return `<td>
     ${datos.cantidad} <span style="color:var(--steel); font-size:11px;">(${money(datos.valor)})</span>
-    ${datos.cantidad>0 ? `<button type="button" class="btn btn-ghost retail-dl-btn" data-cliente="${esc(cliente)}" data-categoria="${categoria}" style="padding:1px 6px; font-size:10.5px; margin-left:4px;" title="Descargar Excel">⬇</button>` : ''}
+    ${datos.cantidad>0 ? `<button type="button" class="btn btn-ghost retail-dl-btn" data-estado="${estado}" data-cliente="${esc(cliente)}" data-categoria="${categoria}" style="padding:1px 6px; font-size:10.5px; margin-left:4px;" title="Descargar Excel">⬇</button>` : ''}
   </td>`;
 }
 
-function renderResumenRetail(){
-  const r = RESULT.resumenRetail;
+function renderResumenRetailTabla(tablaId, r, estado){
   const filas = r.porCliente.map(c => `<tr>
     <td>${esc(c.cliente)}</td>
-    ${celdaRetailHtml(c.cliente, 'programadas', c.programadas)}
-    ${celdaRetailHtml(c.cliente, 'progParcial', c.progParcial)}
-    ${celdaRetailHtml(c.cliente, 'noProgramadas', c.noProgramadas)}
+    ${celdaRetailHtml(c.cliente, 'programadas', c.programadas, estado)}
+    ${celdaRetailHtml(c.cliente, 'progParcial', c.progParcial, estado)}
+    ${celdaRetailHtml(c.cliente, 'noProgramadas', c.noProgramadas, estado)}
   </tr>`).join('');
-  document.getElementById('resumenRetailTable').innerHTML = `
+  document.getElementById(tablaId).innerHTML = `
     <thead><tr><th>Clientes</th><th>Programadas</th><th>Prog. Parcial</th><th>No Programadas</th></tr></thead>
     <tbody>
       ${filas}
@@ -2209,18 +2275,25 @@ function renderResumenRetail(){
         <td>${r.totales.noProgramadas.cantidad} (${money(r.totales.noProgramadas.valor)})</td>
       </tr>
     </tbody>`;
+}
+
+function renderResumenRetail(){
+  renderResumenRetailTabla('resumenRetailTableA', RESULT.resumenRetailA, 'A');
+  renderResumenRetailTabla('resumenRetailTableP', RESULT.resumenRetailP, 'P');
 
   document.querySelectorAll('.retail-dl-btn').forEach(btn => btn.addEventListener('click', () => {
+    const estado = btn.getAttribute('data-estado');
     const cliente = btn.getAttribute('data-cliente');
     const categoria = btn.getAttribute('data-categoria');
-    const fila = RESULT.resumenRetail.porCliente.find(c => c.cliente === cliente);
+    const resumen = estado === 'A' ? RESULT.resumenRetailA : RESULT.resumenRetailP;
+    const fila = resumen.porCliente.find(c => c.cliente === cliente);
     if(!fila) return;
     const etiquetas = {programadas:'Programadas', progParcial:'Prog. Parcial', noProgramadas:'No Programadas'};
-    exportarRetailExcel(fila[categoria].nvs, cliente, etiquetas[categoria]);
+    exportarRetailExcel(fila[categoria].nvs, cliente, etiquetas[categoria], estado);
   }));
 }
 
-function exportarRetailExcel(nvs, cliente, categoriaLabel){
+function exportarRetailExcel(nvs, cliente, categoriaLabel, estado){
   if(!nvs.length){ alert('No hay NV para descargar.'); return; }
   const ordenadas = [...nvs].sort((a,b)=>{
     const fa = a.fecha ? a.fecha.getTime() : Infinity;
@@ -2229,10 +2302,10 @@ function exportarRetailExcel(nvs, cliente, categoriaLabel){
   });
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(ordenadas.map(n => ({
-    'NV': n.nv, 'Fecha Emisión': fmtFecha(n.fecha), 'Cliente': n.cliente, 'Monto Valorizado': n.valorSaldo
+    'NV': n.nv, 'Estado NV': n.nvEstado, 'Fecha Emisión': fmtFecha(n.fecha), 'Cliente': n.cliente, 'Monto Valorizado': n.valorSaldo
   })));
   XLSX.utils.book_append_sheet(wb, ws, categoriaLabel.substring(0,31));
-  XLSX.writeFile(wb, `NV_Retail_${cliente.replace(/[^a-zA-Z0-9]/g,'_')}_${categoriaLabel.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.writeFile(wb, `NV_Retail_${cliente.replace(/[^a-zA-Z0-9]/g,'_')}_${categoriaLabel.replace(/[^a-zA-Z0-9]/g,'_')}_${estado}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 
@@ -2577,7 +2650,7 @@ function aplicarSesion(){
 let tabActivo = null;
 function tabsDisponibles(){
   const tabs = [];
-  if(tienePermiso('verAnalisis')) tabs.push({id:'tabAnalisis', label:'📊 Análisis'});
+  if(tienePermiso('verAnalisis') || tienePermiso('verAnalisisPropio')) tabs.push({id:'tabAnalisis', label:'📊 Análisis'});
   if(tienePermiso('verDespacho')) tabs.push({id:'tabDespacho', label:'📅 Programa de Despacho'});
   if(tienePermiso('verProduccion')) tabs.push({id:'tabProduccion', label:'🏭 Programa de Producción'});
   if(tienePermiso('verNoEfectuados')) tabs.push({id:'tabNoEfectuados', label:'⛔ No Efectuados'});
