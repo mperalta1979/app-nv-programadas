@@ -1650,9 +1650,9 @@ function procesarDatos(rows){
     const noProgramadas = deEsteCliente.filter(n => n.estadoProg === 'No programada');
     return {
       cliente: k,
-      programadas: {cantidad: programadas.length, valor: sumValor(programadas)},
-      progParcial: {cantidad: progParcial.length, valor: sumValor(progParcial)},
-      noProgramadas: {cantidad: noProgramadas.length, valor: sumValor(noProgramadas)},
+      programadas: {cantidad: programadas.length, valor: sumValor(programadas), nvs: programadas},
+      progParcial: {cantidad: progParcial.length, valor: sumValor(progParcial), nvs: progParcial},
+      noProgramadas: {cantidad: noProgramadas.length, valor: sumValor(noProgramadas), nvs: noProgramadas},
     };
   });
   const retailTotales = {
@@ -2217,13 +2217,21 @@ function abrirModalDiferencia(estadoLabel, r){
   document.getElementById('modalDesgloseDiferencia').classList.remove('hidden');
 }
 
+function celdaRetailHtml(cliente, categoria, datos){
+  const btnId = `retailDl_${cliente.replace(/[^a-zA-Z0-9]/g,'_')}_${categoria}`;
+  return `<td>
+    ${datos.cantidad} <span style="color:var(--steel); font-size:11px;">(${money(datos.valor)})</span>
+    ${datos.cantidad>0 ? `<button type="button" class="btn btn-ghost retail-dl-btn" data-cliente="${esc(cliente)}" data-categoria="${categoria}" style="padding:1px 6px; font-size:10.5px; margin-left:4px;" title="Descargar Excel">⬇</button>` : ''}
+  </td>`;
+}
+
 function renderResumenRetail(){
   const r = RESULT.resumenRetail;
   const filas = r.porCliente.map(c => `<tr>
     <td>${esc(c.cliente)}</td>
-    <td>${c.programadas.cantidad} <span style="color:var(--steel); font-size:11px;">(${money(c.programadas.valor)})</span></td>
-    <td>${c.progParcial.cantidad} <span style="color:var(--steel); font-size:11px;">(${money(c.progParcial.valor)})</span></td>
-    <td>${c.noProgramadas.cantidad} <span style="color:var(--steel); font-size:11px;">(${money(c.noProgramadas.valor)})</span></td>
+    ${celdaRetailHtml(c.cliente, 'programadas', c.programadas)}
+    ${celdaRetailHtml(c.cliente, 'progParcial', c.progParcial)}
+    ${celdaRetailHtml(c.cliente, 'noProgramadas', c.noProgramadas)}
   </tr>`).join('');
   document.getElementById('resumenRetailTable').innerHTML = `
     <thead><tr><th>Clientes</th><th>Programadas</th><th>Prog. Parcial</th><th>No Programadas</th></tr></thead>
@@ -2236,7 +2244,32 @@ function renderResumenRetail(){
         <td>${r.totales.noProgramadas.cantidad} (${money(r.totales.noProgramadas.valor)})</td>
       </tr>
     </tbody>`;
+
+  document.querySelectorAll('.retail-dl-btn').forEach(btn => btn.addEventListener('click', () => {
+    const cliente = btn.getAttribute('data-cliente');
+    const categoria = btn.getAttribute('data-categoria');
+    const fila = RESULT.resumenRetail.porCliente.find(c => c.cliente === cliente);
+    if(!fila) return;
+    const etiquetas = {programadas:'Programadas', progParcial:'Prog. Parcial', noProgramadas:'No Programadas'};
+    exportarRetailExcel(fila[categoria].nvs, cliente, etiquetas[categoria]);
+  }));
 }
+
+function exportarRetailExcel(nvs, cliente, categoriaLabel){
+  if(!nvs.length){ alert('No hay NV para descargar.'); return; }
+  const ordenadas = [...nvs].sort((a,b)=>{
+    const fa = a.fecha ? a.fecha.getTime() : Infinity;
+    const fb = b.fecha ? b.fecha.getTime() : Infinity;
+    return fa - fb;
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(ordenadas.map(n => ({
+    'NV': n.nv, 'Fecha Emisión': fmtFecha(n.fecha), 'Cliente': n.cliente, 'Monto Valorizado': n.valorSaldo
+  })));
+  XLSX.utils.book_append_sheet(wb, ws, categoriaLabel.substring(0,31));
+  XLSX.writeFile(wb, `NV_Retail_${cliente.replace(/[^a-zA-Z0-9]/g,'_')}_${categoriaLabel.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 
 function renderResumenSituacion(){
   renderResumenSituacionBox('resumenSituacionTableA', RESULT.resumenSituacionA);
