@@ -1551,11 +1551,11 @@ function procesarDatos(rows){
       nvMap[r.nv] = {
         nv:r.nv, nvEstado:r.nvEstado, vendedor:r.vendedor, cliente:r.cliente, fecha:r.fecha_dt,
         bloqueado:r.bloqueado, retenida:r.retenida, retira:r.retira, despachar:r.despachar,
-        lineasTotal:0, lineasProgramadas:0, motivos:new Set(), valorSaldo:0
+        lineasTotal:0, lineasProgramadas:0, motivos:new Set(), valorSaldo:0, valorLineasProgramadas:0
       };
     }
     nvMap[r.nv].lineasTotal++;
-    if(r.programada) nvMap[r.nv].lineasProgramadas++;
+    if(r.programada){ nvMap[r.nv].lineasProgramadas++; nvMap[r.nv].valorLineasProgramadas += r.saldoValor; }
     nvMap[r.nv].valorSaldo += r.saldoValor;
     const op = (r.operacion===undefined||r.operacion===null) ? '' : String(r.operacion).trim();
     if(op && op!=='0') nvMap[r.nv].motivos.add(op);
@@ -1623,6 +1623,7 @@ function procesarDatos(rows){
   const resumenSituacionP = construirResumenSituacion(nvList.filter(n=>n.nvEstado==='P'));
 
   const sumValor = arr => arr.reduce((s,n)=>s+n.valorSaldo,0);
+  const sumValorProgramado = arr => arr.reduce((s,n)=>s+n.valorLineasProgramadas,0);
 
   const dashboard = {
     totalNV: nvList.length,
@@ -1632,13 +1633,13 @@ function procesarDatos(rows){
     pendientes: nvList.filter(n=>n.nvEstado==='P').length,
     pendientesValor: sumValor(nvList.filter(n=>n.nvEstado==='P')),
     programadas: nvList.filter(n=>n.estadoProg==='Programada').length,
-    programadasValor: sumValor(nvList.filter(n=>n.estadoProg==='Programada')),
+    programadasValor: sumValorProgramado(nvList.filter(n=>n.estadoProg==='Programada')),
     programadasRetira: nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Retira Cliente').length,
-    programadasRetiraValor: sumValor(nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Retira Cliente')),
+    programadasRetiraValor: sumValorProgramado(nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Retira Cliente')),
     programadasDespacho: nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Por Despachar').length,
-    programadasDespachoValor: sumValor(nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Por Despachar')),
+    programadasDespachoValor: sumValorProgramado(nvList.filter(n=>n.estadoProg==='Programada' && n.tipo==='Por Despachar')),
     progParcial: nvList.filter(n=>n.estadoProg==='Prog. Parcial').length,
-    progParcialValor: sumValor(nvList.filter(n=>n.estadoProg==='Prog. Parcial')),
+    progParcialValor: sumValorProgramado(nvList.filter(n=>n.estadoProg==='Prog. Parcial')),
     noProgramadas: noProgramadasNV.length,
     noProgramadasValor: sumValor(noProgramadasNV),
     noProgRetira: noProgramadasNV.filter(n=>n.tipo==='Retira Cliente').length,
@@ -1673,8 +1674,8 @@ function procesarDatos(rows){
     p.total++; p.totalValor += n.valorSaldo;
     if(n.nvEstado==='A'){ p.aprobadas++; p.aprobadasValor += n.valorSaldo; }
     else if(n.nvEstado==='P'){ p.pendientes++; p.pendientesValor += n.valorSaldo; }
-    if(n.estadoProg==='Programada'){ p.programadas++; p.programadasValor += n.valorSaldo; }
-    else if(n.estadoProg==='Prog. Parcial'){ p.progParcial++; p.progParcialValor += n.valorSaldo; }
+    if(n.estadoProg==='Programada'){ p.programadas++; p.programadasValor += n.valorLineasProgramadas; }
+    else if(n.estadoProg==='Prog. Parcial'){ p.progParcial++; p.progParcialValor += n.valorLineasProgramadas; }
     else {
       p.noProgramadas++; p.noProgramadasValor += n.valorSaldo;
       if(n.tipo==='Retira Cliente'){ p.noProgRetira++; p.noProgRetiraValor += n.valorSaldo; }
