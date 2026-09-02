@@ -214,6 +214,18 @@
     thead th, tbody td{padding:7px 8px;}
     .wrap{padding:16px 12px 40px;}
   }
+
+  #reportePDF{display:none;}
+  @media print{
+    body > *:not(#reportePDF){display:none !important;}
+    #reportePDF{display:block !important; padding:20px; font-family:'Segoe UI', Arial, sans-serif; color:#1c2b36;}
+    #reportePDF h1{font-size:20px; color:#1F4E78; margin:0 0 4px;}
+    #reportePDF .sub{font-size:12px; color:#4a6f8a; margin-bottom:18px;}
+    #reportePDF table{width:100%; border-collapse:collapse; margin-bottom:16px; font-size:12px;}
+    #reportePDF th, #reportePDF td{border:1px solid #d5dee5; padding:6px 8px; text-align:left;}
+    #reportePDF th{background:#eef4f8;}
+    #reportePDF h2{font-size:14px; color:#1F4E78; margin:18px 0 8px; border-bottom:2px solid #1F4E78; padding-bottom:4px;}
+  }
 </style>
 </head>
 <body>
@@ -224,6 +236,7 @@
   <div class="subtitle">Visión de NV vigentes (Aprobadas/Pendientes): estado, programación, tipo de despacho y cobertura de stock disponible por código para Retira Cliente y Por Despachar.</div>
   <div id="sesionBar" class="hidden" style="position:relative; z-index:1; margin-top:12px; display:flex; align-items:center; gap:10px; font-size:12.5px;">
     <span style="background:rgba(255,255,255,.15); padding:4px 10px; border-radius:20px;" id="sesionLabel"></span>
+    <span style="background:rgba(255,255,255,.15); padding:4px 10px; border-radius:20px;" id="ultimaActualizacionBadge"></span>
     <button id="btnLogout" style="background:rgba(255,255,255,.15); border:none; color:#fff; padding:4px 10px; border-radius:20px; font-size:12.5px; cursor:pointer; font-weight:600;">Cerrar sesión</button>
   </div>
 </div>
@@ -319,6 +332,10 @@
   <div id="app" class="hidden">
 
     <div class="section-title">Dashboard general (NV, no líneas)</div>
+    <div id="avisoSaldoCero" class="hidden" style="background:#fff4e9; border:1px solid #f0c896; border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:13px; color:#7a4a0a;"></div>
+    <div style="margin-bottom:16px;">
+      <button class="btn btn-export" id="btnGenerarReportePDF">🖨️ Generar reporte PDF (1 página)</button>
+    </div>
     <div class="cards" id="dashCards"></div>
 
     <div class="panel">
@@ -349,6 +366,19 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="panel" id="panelTendenciaDiferencia">
+      <div class="panel-head"><h2>📈 Tendencia — Diferencia semanal (A+P)</h2></div>
+      <div class="panel-body pad">
+        <div style="overflow-x:auto;">
+          <svg id="tendenciaSvg" width="100%" style="min-width:600px; display:block;"></svg>
+        </div>
+        <div class="tablewrap" style="margin-top:16px;">
+          <table id="tendenciaTable"></table>
+        </div>
+      </div>
+      <div class="assumption-note">Se registra un punto cada vez que el Admin carga un Excel de NV nuevo (un punto por día, se reemplaza si se carga más de una vez el mismo día). Agrupado por semana (lunes a domingo).</div>
     </div>
 
     <div class="panel" id="panelResumenA">
@@ -442,6 +472,8 @@
     </div>
 
   </div>
+
+  <div id="reportePDF"></div>
 
   <div id="modalDesgloseDiferencia" class="modal-overlay hidden">
     <div class="modal-box">
@@ -554,6 +586,8 @@
       </div>
       <div class="toolbar">
         <select id="neRetiroVendedorFiltro" style="padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;"></select>
+        <button class="btn btn-ghost" id="btnEnviarWhatsappRetiro" style="padding:8px 12px;">📲 WhatsApp al vendedor</button>
+        <button class="btn btn-ghost" id="btnEnviarEmailRetiro" style="padding:8px 12px;">✉️ Email al vendedor</button>
       </div>
       <div class="panel-body">
         <div class="tablewrap">
@@ -1118,6 +1152,102 @@ const GUIAS_KEY = 'nvprog_guias_v1';
 let GUIAS_DATA = null; // {porNVCodigo: {'nv|codigo': [fechasISO...]}, devoluciones: {'nv': [{...}]}, filename, savedAt}
 let firebaseUnsubGuias = null;
 
+/* ============================================================
+   Historial de tendencia — snapshot diario de "Diferencia" (A+P)
+   ============================================================ */
+const HISTORIAL_KEY = 'nvprog_historial_diferencia_v1';
+let HISTORIAL_DIFERENCIA = {}; // { 'YYYY-MM-DD': {cantidad, valor} }
+let firebaseUnsubHistorial = null;
+
+function fechaHoyISO(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function semanaLabelGlobal(fechaISO){
+  const d = new Date(fechaISO+'T00:00:00'); d.setHours(0,0,0,0);
+  const dia = d.getDay();
+  const offset = dia===0 ? -6 : 1-dia;
+  const lunes = new Date(d); lunes.setDate(d.getDate()+offset);
+  return `${String(lunes.getDate()).padStart(2,'0')}/${String(lunes.getMonth()+1).padStart(2,'0')}`;
+}
+function renderTendenciaDiferencia(){
+  const fechas = Object.keys(HISTORIAL_DIFERENCIA).sort();
+  if(fechas.length < 1){
+    document.getElementById('tendenciaSvg').innerHTML = `<text x="20" y="30" font-size="12" fill="#4a6f8a" font-family="Segoe UI, Arial">Aún no hay suficiente historial — vuelve a revisar en unos días.</text>`;
+    document.getElementById('tendenciaTable').innerHTML = '';
+    return;
+  }
+  // Agrupar por semana: se queda con el ultimo snapshot (fecha mas reciente) de cada semana
+  const porSemana = {};
+  fechas.forEach(f => {
+    const semana = semanaLabelGlobal(f);
+    porSemana[semana] = HISTORIAL_DIFERENCIA[f]; // como fechas viene ordenado asc, el ultimo sobreescribe
+  });
+  const semanasOrdenadas = Object.keys(porSemana); // ya en orden de aparicion (asc por fecha)
+  const puntos = semanasOrdenadas.map(s => porSemana[s]);
+
+  // Grafico de linea simple
+  const W = Math.max(500, semanasOrdenadas.length*80), H = 220, padL = 70, padR = 20, padT = 20, padB = 40;
+  const maxValor = Math.max(1, ...puntos.map(p=>p.valor));
+  const x = i => padL + (semanasOrdenadas.length<=1 ? 0 : i*(W-padL-padR)/(semanasOrdenadas.length-1));
+  const y = v => padT + (1 - v/maxValor) * (H-padT-padB);
+
+  let path = puntos.map((p,i) => `${i===0?'M':'L'} ${x(i).toFixed(1)},${y(p.valor).toFixed(1)}`).join(' ');
+  let svgContent = `<path d="${path}" fill="none" stroke="#2e75b6" stroke-width="2.5"/>`;
+  puntos.forEach((p,i) => {
+    svgContent += `<circle cx="${x(i).toFixed(1)}" cy="${y(p.valor).toFixed(1)}" r="4" fill="#1F4E78"><title>Semana del ${semanasOrdenadas[i]}: ${money(p.valor)} (${p.cantidad} NV)</title></circle>`;
+    svgContent += `<text x="${x(i).toFixed(1)}" y="${H-padB+18}" font-size="10.5" text-anchor="middle" fill="#4a6f8a" font-family="Segoe UI, Arial">${esc(semanasOrdenadas[i])}</text>`;
+  });
+  // Eje Y con 3 marcas
+  [0,0.5,1].forEach(f => {
+    const val = maxValor*f;
+    svgContent += `<text x="${padL-8}" y="${y(val).toFixed(1)+4}" font-size="10" text-anchor="end" fill="#4a6f8a" font-family="Segoe UI, Arial">${money(val)}</text>`;
+    svgContent += `<line x1="${padL}" y1="${y(val).toFixed(1)}" x2="${W-padR}" y2="${y(val).toFixed(1)}" stroke="#e5edf2" stroke-width="1"/>`;
+  });
+  const svg = document.getElementById('tendenciaSvg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = svgContent;
+
+  document.getElementById('tendenciaTable').innerHTML = `
+    <thead><tr><th>Semana (lunes)</th><th>NV en Diferencia</th><th>Valor</th></tr></thead>
+    <tbody>
+      ${semanasOrdenadas.map((s,i)=>`<tr><td>${esc(s)}</td><td>${puntos[i].cantidad}</td><td>${money(puntos[i].valor)}</td></tr>`).join('')}
+    </tbody>`;
+}
+
+function cargarHistorialLocal(){
+  try{ const raw = localStorage.getItem(HISTORIAL_KEY); return raw ? JSON.parse(raw) : {}; }catch(e){ return {}; }
+}
+function guardarHistorialLocal(obj){
+  try{ localStorage.setItem(HISTORIAL_KEY, JSON.stringify(obj)); }catch(e){}
+}
+function registrarSnapshotDiario(resultado){
+  const cantidad = resultado.resumenSituacionA.diferencia.cantidad + resultado.resumenSituacionP.diferencia.cantidad;
+  const valor = resultado.resumenSituacionA.diferencia.valor + resultado.resumenSituacionP.diferencia.valor;
+  HISTORIAL_DIFERENCIA[fechaHoyISO()] = {cantidad, valor};
+  guardarHistorialLocal(HISTORIAL_DIFERENCIA);
+  if(firebaseListo){
+    const update = {};
+    update['dias.'+fechaHoyISO()] = {cantidad, valor};
+    update.claveAdmin = FIREBASE_ADMIN_KEY;
+    firebaseDb.collection('nv_programadas').doc('historial_diferencia').set(update, {merge:true})
+      .catch(err => console.warn('No se pudo guardar el historial de tendencia:', err));
+  }
+}
+function suscribirseAHistorial(){
+  HISTORIAL_DIFERENCIA = cargarHistorialLocal();
+  if(!firebaseListo) return;
+  if(firebaseUnsubHistorial) firebaseUnsubHistorial();
+  firebaseUnsubHistorial = firebaseDb.collection('nv_programadas').doc('historial_diferencia').onSnapshot(doc => {
+    if(doc.exists && doc.data().dias){
+      HISTORIAL_DIFERENCIA = doc.data().dias;
+      guardarHistorialLocal(HISTORIAL_DIFERENCIA);
+      if(RESULT) renderTendenciaDiferencia();
+    }
+  }, err => console.warn('Error escuchando historial:', err));
+}
+
+
 function procesarGuias(rows){
   const porNVCodigo = {};
   const devolucionesMap = {};
@@ -1567,7 +1697,10 @@ function procesarDatos(rows){
     return n;
   });
 
-  const noProgramadasNV = nvList.filter(n=>n.estadoProg==='No programada');
+  const noProgramadasNV = nvList.filter(n=>n.estadoProg==='No programada' && n.valorSaldo > 0);
+
+  /* -------- Aviso de calidad de datos: NV vigentes (A/P) con Saldo$ = 0 en todas sus líneas -------- */
+  const nvSaldoCero = nvList.filter(n=>n.valorSaldo <= 0);
 
   /* -------- Resumen Situación Notas de Venta, separado por Estado (A/P) -------- */
   const sumValorNv = arr => arr.reduce((s,n)=>s+n.valorSaldo,0);
@@ -1577,7 +1710,7 @@ function procesarDatos(rows){
     const resRetenidas = nvSubconjunto.filter(n=>n.retenida==='Si');
     const resProgramables = nvSubconjunto.filter(n=>n.retenida!=='Si');
     const resRetiraNoRetenida = nvSubconjunto.filter(n=>n.retira==='Si' && n.retenida!=='Si');
-    const resDespacharNoRetenida = nvSubconjunto.filter(n=>n.despachar==='Si' && n.retenida!=='Si');
+    const resDespacharNoRetenida = nvSubconjunto.filter(n=>n.despachar==='Si' && n.retenida!=='Si' && n.valorSaldo > 0);
     const resProgramadas = resDespacharNoRetenida.filter(n=>n.estadoProg!=='No programada'); // total o parcialmente
     const resDiferencia = resDespacharNoRetenida.filter(n=>n.estadoProg==='No programada');
 
@@ -1729,7 +1862,7 @@ function procesarDatos(rows){
       if(n.tipo==='Retira Cliente'){ p.progParcialRetira++; p.progParcialRetiraValor += n.valorLineasProgramadas; }
       else if(n.tipo==='Por Despachar'){ p.progParcialDespacho++; p.progParcialDespachoValor += n.valorLineasProgramadas; }
     }
-    else {
+    else if(n.valorSaldo > 0){
       p.noProgramadas++; p.noProgramadasValor += n.valorSaldo;
       if(n.tipo==='Retira Cliente'){ p.noProgRetira++; p.noProgRetiraValor += n.valorSaldo; }
       else if(n.tipo==='Por Despachar'){ p.noProgDespacho++; p.noProgDespachoValor += n.valorSaldo; }
@@ -2004,7 +2137,7 @@ function procesarDatos(rows){
     usaGuias,
   };
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion };
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion, nvSaldoCero };
 }
 
 /* ============================================================
@@ -2026,9 +2159,11 @@ function aplicarPermisosPanelesAnalisis(){
 
 function render(){
   document.getElementById('app').classList.remove('hidden');
+  renderAvisoSaldoCero();
   renderDashCards();
   renderGraficosDashboard();
   renderResumenSituacion();
+  renderTendenciaDiferencia();
   renderResumenRetail();
   renderDashVendorTable();
   renderBloqueados();
@@ -2065,6 +2200,63 @@ function dashboardParaVendedorActual(){
   d.otrosMotivosTotal = d.otrosMotivosRetira + d.otrosMotivosDespacho;
   d.otrosMotivosTotalValor = d.otrosMotivosRetiraValor + d.otrosMotivosDespachoValor;
   return d;
+}
+
+function generarReportePDF(){
+  const d = RESULT.dashboard;
+  const hoy = new Date();
+  const diferenciaTotal = RESULT.resumenSituacionA.diferencia.valor + RESULT.resumenSituacionP.diferencia.valor;
+  const diferenciaCant = RESULT.resumenSituacionA.diferencia.cantidad + RESULT.resumenSituacionP.diferencia.cantidad;
+  const motivosCombinados = {};
+  [...RESULT.resumenSituacionA.diferenciaPorMotivo, ...RESULT.resumenSituacionP.diferenciaPorMotivo].forEach(m => {
+    if(!motivosCombinados[m.motivo]) motivosCombinados[m.motivo] = {motivo:m.motivo, cantidad:0, valor:0};
+    motivosCombinados[m.motivo].cantidad += m.cantidad;
+    motivosCombinados[m.motivo].valor += m.valor;
+  });
+  const topMotivos = Object.values(motivosCombinados).sort((a,b)=>b.valor-a.valor).slice(0,6);
+
+  document.getElementById('reportePDF').innerHTML = `
+    <h1>PETROFLEX — Reporte Ejecutivo NV Programadas</h1>
+    <div class="sub">Generado el ${fmtFecha(hoy)} a las ${hoy.getHours().toString().padStart(2,'0')}:${hoy.getMinutes().toString().padStart(2,'0')} · Datos de: ${esc((cargarDatosGuardados()||{}).filenameActual||'')}</div>
+
+    <h2>Resumen General</h2>
+    <table>
+      <tr><th>NV Totales (A/P)</th><td>${d.totalNV}</td><td>${money(d.totalValor)}</td></tr>
+      <tr><th>Programadas</th><td>${d.programadas}</td><td>${money(d.programadasValor)}</td></tr>
+      <tr><th>Prog. Parcial</th><td>${d.progParcial}</td><td>${money(d.progParcialValor)}</td></tr>
+      <tr><th>No Programadas</th><td>${d.noProgramadas}</td><td>${money(d.noProgramadasValor)}</td></tr>
+      <tr><th>Diferencia (Por Despachar sin programar, con saldo real)</th><td>${diferenciaCant}</td><td>${money(diferenciaTotal)}</td></tr>
+      <tr><th>Retenidas por crédito</th><td>${d.retenidas}</td><td>${money(d.retenidasValor)}</td></tr>
+      <tr><th>Bloqueadas</th><td>${d.bloqueadas}</td><td>${money(d.bloqueadasValor)}</td></tr>
+    </table>
+
+    <h2>Principales motivos de la Diferencia</h2>
+    <table>
+      <thead><tr><th>Motivo</th><th>Cantidad</th><th>Valor</th></tr></thead>
+      <tbody>
+        ${topMotivos.map(m=>`<tr><td>${esc(m.motivo)}</td><td>${m.cantidad}</td><td>${money(m.valor)}</td></tr>`).join('')}
+      </tbody>
+    </table>
+  `;
+  window.print();
+}
+
+function renderAvisoSaldoCero(){
+  const el = document.getElementById('avisoSaldoCero');
+  const n = RESULT.nvSaldoCero.length;
+  if(!n){ el.classList.add('hidden'); return; }
+  const valorRef = RESULT.nvSaldoCero.reduce((s,x)=>s+x.lineasTotal,0);
+  el.classList.remove('hidden');
+  el.innerHTML = `⚠️ <strong>${n} NV</strong> tienen Saldo$ = $0 en todas sus líneas (probablemente un problema de datos del sistema origen, no NV realmente resueltas) — revisa con el equipo de sistemas. <button class="btn btn-ghost" id="btnExportSaldoCero" style="padding:3px 10px; margin-left:6px;">⬇ Ver listado</button>`;
+  const btn = document.getElementById('btnExportSaldoCero');
+  if(btn) btn.addEventListener('click', () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(RESULT.nvSaldoCero.map(x=>({
+      'NV': x.nv, 'Estado NV': x.nvEstado, 'Fecha': fmtFecha(x.fecha), 'Cliente': x.cliente, 'Vendedor': x.vendedor, 'Tipo': x.tipo
+    })));
+    XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja('NV Saldo Cero'));
+    XLSX.writeFile(wb, `NV_Saldo_Cero_${new Date().toISOString().slice(0,10)}.xlsx`);
+  });
 }
 
 function renderDashCards(){
@@ -2169,8 +2361,9 @@ function renderPieMotivos(svgId, legendId, r, opciones){
 }
 
 function exportarMotivoExcel(resumen, motivo, estadoLabel){
-  const nvs = (resumen.diferenciaPorMotivoDetalle && resumen.diferenciaPorMotivoDetalle[motivo]) || [];
-  if(!nvs.length){ alert('No hay NV para este motivo.'); return; }
+  const todas = (resumen.diferenciaPorMotivoDetalle && resumen.diferenciaPorMotivoDetalle[motivo]) || [];
+  const nvs = todas.filter(n => n.valorSaldo > 0); // se excluyen NV con saldo $0 en todas sus líneas
+  if(!nvs.length){ alert('No hay NV con saldo valorizado para este motivo.'); return; }
   const ordenadas = [...nvs].sort((a,b)=>{
     const fa = a.fecha ? a.fecha.getTime() : Infinity;
     const fb = b.fecha ? b.fecha.getTime() : Infinity;
@@ -2604,6 +2797,7 @@ function logout(){
   if(firebaseUnsubSeguimiento){ firebaseUnsubSeguimiento(); firebaseUnsubSeguimiento = null; }
   if(firebaseUnsubRoles){ firebaseUnsubRoles(); firebaseUnsubRoles = null; }
   if(firebaseUnsubGuias){ firebaseUnsubGuias(); firebaseUnsubGuias = null; }
+  if(firebaseUnsubHistorial){ firebaseUnsubHistorial(); firebaseUnsubHistorial = null; }
   document.getElementById('loginWrap').classList.remove('hidden');
   document.getElementById('mainWrap').classList.add('hidden');
   document.getElementById('sesionBar').classList.add('hidden');
@@ -2647,6 +2841,7 @@ function aplicarSesion(){
   suscribirseASeguimiento();
   suscribirseARolesConfig();
   suscribirseAGuias();
+  suscribirseAHistorial();
 
   renderTabsNav();
   if(tienePermiso('accesoMaestro')){ renderUsersTable(); renderRolesConfigTable(); }
@@ -3062,6 +3257,16 @@ function tablaNoEfectuadoHtml(rows){
     </tbody>`;
 }
 
+function armarMensajeRetiroNoEfectuado(){
+  if(neRetiroVendedorFiltro === '__TODOS__'){ alert('Selecciona primero un vendedor específico en el filtro.'); return null; }
+  const rows = RESULT.noEfectuados.retiro.filter(r=>r.vendedor===neRetiroVendedorFiltro);
+  if(!rows.length){ alert('Ese vendedor no tiene NV de Retiro No Efectuado pendientes.'); return null; }
+  const totalValor = rows.reduce((s,r)=>s+r.valor,0);
+  const detalle = rows.slice(0,10).map(r => `- NV ${r.nv} — ${r.cliente} (${r.diasAtraso}d de atraso, ${money(r.valor)})`).join('\n');
+  const extra = rows.length > 10 ? `\n...y ${rows.length-10} más` : '';
+  return `Hola ${neRetiroVendedorFiltro}, tienes ${rows.length} NV programadas para Retiro Cliente que no fueron retiradas (total ${money(totalValor)}):\n\n${detalle}${extra}\n\n¿Puedes coordinar con el cliente para que las retire pronto?`;
+}
+
 function renderRetiroNoEfTable(){
   const ne = RESULT.noEfectuados;
   const rows = neRetiroVendedorFiltro==='__TODOS__' ? ne.retiro : ne.retiro.filter(r=>r.vendedor===neRetiroVendedorFiltro);
@@ -3454,9 +3659,26 @@ function borrarDatosGuardados(){
   document.getElementById('nvDiffPanel').classList.add('hidden');
 }
 
+let ultimaActualizacionISO = null;
+function actualizarBadgeUltimaActualizacion(){
+  const el = document.getElementById('ultimaActualizacionBadge');
+  if(!el) return;
+  if(!ultimaActualizacionISO){ el.textContent = ''; return; }
+  const ms = Date.now() - new Date(ultimaActualizacionISO).getTime();
+  const horas = ms / 3600000;
+  let texto;
+  if(horas < 1) texto = `🕐 Actualizado hace ${Math.max(1,Math.round(ms/60000))} min`;
+  else if(horas < 24) texto = `🕐 Actualizado hace ${Math.round(horas)} h`;
+  else texto = `🕐 Actualizado hace ${Math.round(horas/24)} d`;
+  el.textContent = texto;
+}
+setInterval(actualizarBadgeUltimaActualizacion, 60000);
+
 function mostrarInfoDatosGuardados(filename, savedAt){
   const el = document.getElementById('datosGuardadosInfo');
   const fecha = new Date(savedAt);
+  ultimaActualizacionISO = savedAt;
+  actualizarBadgeUltimaActualizacion();
   el.innerHTML = `📌 Datos cargados: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')}) — se mantienen hasta que cargues un archivo nuevo.` +
     (sesion && tienePermiso('accesoMaestro') ?
       ` <button class="btn btn-ghost" id="btnExportarDatos" style="padding:3px 10px; margin-left:8px;">⬇ Exportar datos (respaldo)</button>` +
@@ -3568,6 +3790,7 @@ function handleFile(file){
     mostrarInfoDatosGuardados(file.name, NV_ROWS_ACTUAL_RAW.savedAt);
     guardarDatosEnNube(rowsNuevo, file.name); // sincroniza para todos los usuarios (desplaza actual->anterior en la nube también)
     actualizarSeguimientoSinProgramar(); // revisa NV que llevan +3 días sin programar y avisa por ntfy si corresponde
+    registrarSnapshotDiario(RESULT); // guarda el punto de hoy para el gráfico de tendencia semanal
     currentVendor = null;
     currentTipo = 'Retira Cliente';
     render();
@@ -3622,6 +3845,22 @@ document.getElementById('btnExportRetiroNoEf').addEventListener('click', () => {
 document.getElementById('btnExportDespachoNoEf').addEventListener('click', () => {
   exportarNoEfectuadoExcel(RESULT.noEfectuados.despacho, 'Despacho_No_Efectuado', 'Despacho No Efectuado');
 });
+document.getElementById('btnEnviarWhatsappRetiro').addEventListener('click', () => {
+  const msg = armarMensajeRetiroNoEfectuado();
+  if(!msg) return;
+  const contacto = CONTACTOS[neRetiroVendedorFiltro];
+  if(!contacto || !contacto.length){ alert('No hay celular registrado para este vendedor.'); return; }
+  window.open(`https://wa.me/${contacto[0].cel}?text=${encodeURIComponent(msg)}`, '_blank');
+});
+document.getElementById('btnEnviarEmailRetiro').addEventListener('click', () => {
+  const msg = armarMensajeRetiroNoEfectuado();
+  if(!msg) return;
+  const contacto = CONTACTOS[neRetiroVendedorFiltro];
+  if(!contacto || !contacto.length){ alert('No hay correo registrado para este vendedor.'); return; }
+  const subject = encodeURIComponent(`NV Retiro Cliente sin retirar — ${neRetiroVendedorFiltro}`);
+  window.location.href = `mailto:${contacto[0].email}?subject=${subject}&body=${encodeURIComponent(msg)}`;
+});
+document.getElementById('btnGenerarReportePDF').addEventListener('click', generarReportePDF);
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
