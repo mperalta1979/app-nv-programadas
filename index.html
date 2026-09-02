@@ -616,15 +616,6 @@
         </div>
       </div>
     </div>
-
-    <div class="panel hidden" id="devolucionesPanel">
-      <div class="panel-head"><h2>↩️ Devoluciones detectadas (guías Tipo Entrada vinculadas a NV)</h2></div>
-      <div class="panel-body">
-        <div class="tablewrap">
-          <table id="devolucionesTable"></table>
-        </div>
-      </div>
-    </div>
   </div>
 
 </div>
@@ -2113,19 +2104,6 @@ function procesarDatos(rows){
     });
   }
 
-  // Devoluciones: NV vigentes que tienen guías Tipo='E' (entrada/devolución) vinculadas
-  const devoluciones = [];
-  if(GUIAS_DATA && GUIAS_DATA.devoluciones){
-    const nvVigentesSet = new Set(disponibles.map(r=>String(r.nv)));
-    Object.keys(GUIAS_DATA.devoluciones).forEach(nv => {
-      if(!nvVigentesSet.has(String(nv))) return;
-      const linea = disponibles.find(r=>String(r.nv)===String(nv));
-      GUIAS_DATA.devoluciones[nv].forEach(d => {
-        devoluciones.push({nv, cliente: linea?linea.cliente:'', vendedor: linea?linea.vendedor:'', codigo:d.codigo, fecha:d.fecha, cantidad:d.cantidad, valor:d.valor});
-      });
-    });
-  }
-
   const noEfectuados = {
     retiro: retiroNoEfectuado,
     despacho: despachoNoEfectuado,
@@ -2133,7 +2111,6 @@ function procesarDatos(rows){
     despachoTotal: {cantidad: despachoNoEfectuado.length, valor: despachoNoEfectuado.reduce((s,r)=>s+r.valor,0)},
     retiroSemanal: resumenSemanal(retiroNoEfectuado),
     despachoSemanal: resumenSemanal(despachoNoEfectuado),
-    devoluciones,
     usaGuias,
   };
 
@@ -3204,7 +3181,6 @@ function renderNoEfectuados(){
   document.getElementById('noEfectuadosCards').innerHTML = `
     <div class="card red"><div class="label">Retiro No Efectuado</div><div class="value">${ne.retiroTotal.cantidad}</div><div class="sub">${money(ne.retiroTotal.valor)}</div></div>
     <div class="card red"><div class="label">Por Despachar No Efectuado</div><div class="value">${ne.despachoTotal.cantidad}</div><div class="sub">${money(ne.despachoTotal.valor)}</div></div>
-    <div class="card"><div class="label">Devoluciones detectadas</div><div class="value">${ne.devoluciones.length}</div></div>
   `;
 
   // Filtro de vendedor para Retiro (para exportar solo a un vendedor puntual)
@@ -3229,18 +3205,6 @@ function renderNoEfectuados(){
         : `<tr><td colspan="4" class="empty">Sin datos de semanas con incumplimientos.</td></tr>`}
     </tbody>`;
 
-  const devPanel = document.getElementById('devolucionesPanel');
-  if(ne.devoluciones.length){
-    devPanel.classList.remove('hidden');
-    document.getElementById('devolucionesTable').innerHTML = `
-      <thead><tr><th>NV</th><th>Cliente</th><th>Vendedor</th><th>Código</th><th>Fecha</th><th>Cantidad</th><th>Valor</th></tr></thead>
-      <tbody>${ne.devoluciones.map(d=>`<tr>
-        <td>${esc(d.nv)}</td><td>${esc(d.cliente)}</td><td>${esc(d.vendedor)}</td><td>${esc(d.codigo)}</td>
-        <td>${fmtFecha(new Date(d.fecha))}</td><td>${num(d.cantidad)}</td><td>${money(d.valor)}</td>
-      </tr>`).join('')}</tbody>`;
-  } else {
-    devPanel.classList.add('hidden');
-  }
 }
 
 function tablaNoEfectuadoHtml(rows){
