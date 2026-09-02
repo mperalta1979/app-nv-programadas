@@ -1428,6 +1428,13 @@ function esc(s){
   return String(s===undefined || s===null ? '' : s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+/* Excel prohíbe : \ / ? * [ ] en nombres de hoja, y limita a 31 caracteres. */
+function sanitizarNombreHoja(str){
+  return String(str===undefined || str===null ? '' : str)
+    .replace(/[:\\\/\?\*\[\]]/g, '-')
+    .substring(0, 31) || 'Hoja1';
+}
+
 /* ============================================================
    Procesamiento principal
    ============================================================ */
@@ -2173,7 +2180,7 @@ function exportarMotivoExcel(resumen, motivo, estadoLabel){
   const ws = XLSX.utils.json_to_sheet(ordenadas.map(n => ({
     'NV': n.nv, 'Estado NV': n.nvEstado, 'Fecha': fmtFecha(n.fecha), 'Cliente': n.cliente, 'Vendedor': n.vendedor, 'Monto': n.valorSaldo
   })));
-  XLSX.utils.book_append_sheet(wb, ws, motivo.substring(0,31));
+  XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(motivo));
   XLSX.writeFile(wb, `NV_${motivo.replace(/[^a-zA-Z0-9]/g,'_')}_${estadoLabel}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
@@ -2304,7 +2311,7 @@ function exportarRetailExcel(nvs, cliente, categoriaLabel, estado){
   const ws = XLSX.utils.json_to_sheet(ordenadas.map(n => ({
     'NV': n.nv, 'Estado NV': n.nvEstado, 'Fecha Emisión': fmtFecha(n.fecha), 'Cliente': n.cliente, 'Monto Valorizado': n.valorSaldo
   })));
-  XLSX.utils.book_append_sheet(wb, ws, categoriaLabel.substring(0,31));
+  XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(categoriaLabel));
   XLSX.writeFile(wb, `NV_Retail_${cliente.replace(/[^a-zA-Z0-9]/g,'_')}_${categoriaLabel.replace(/[^a-zA-Z0-9]/g,'_')}_${estado}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
@@ -3069,7 +3076,7 @@ function exportarNoEfectuadoExcel(rows, nombreArchivo, hojaNombre){
     'Cliente': r.cliente, 'Vendedor': r.vendedor, 'Fecha Programada': fmtFecha(r.fechaProgramada),
     'Días de Atraso': r.diasAtraso, 'Saldo': r.saldo, 'Valor': r.valor, 'Estado': r.estado
   })));
-  XLSX.utils.book_append_sheet(wb, ws, hojaNombre.substring(0,31));
+  XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(hojaNombre));
   XLSX.writeFile(wb, `${nombreArchivo}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
@@ -3303,7 +3310,7 @@ function exportVendorExcel(vendedor, tipo){
   const rows = RESULT.analisis.filter(a=>a.vendedor===vendedor && a.tipo===tipo);
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(analisisToSheetRows(rows));
-  XLSX.utils.book_append_sheet(wb, ws, (vendedor+'-'+tipo).substring(0,31));
+  XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(vendedor+'-'+tipo));
   XLSX.writeFile(wb, `NV_${tipo.replace(/ /g,'_')}_${vendedor.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
@@ -3364,7 +3371,7 @@ function exportAllExcel(){
       'Vendedor': r.vendedor, 'NV Total': r.nvTotal, 'Completas': r.completo, 'Parciales': r.parcial,
       'Sin Cobertura': r.noCubre, 'Valor Cubierto': r.valorCubierto, 'Valor Sin Cubrir': r.valorSinCubrir
     })));
-    XLSX.utils.book_append_sheet(wb, wsResumen, ('Resumen '+tipo).substring(0,31));
+    XLSX.utils.book_append_sheet(wb, wsResumen, sanitizarNombreHoja('Resumen '+tipo));
   });
 
   const wsAnalisis = XLSX.utils.json_to_sheet(analisisToSheetRows(RESULT.analisis));
@@ -3399,7 +3406,7 @@ function exportAllExcel(){
   RESULT.vendedoresConDatos.forEach(v => {
     const rows = RESULT.analisis.filter(a=>a.vendedor===v);
     const ws = XLSX.utils.json_to_sheet(analisisToSheetRows(rows));
-    XLSX.utils.book_append_sheet(wb, ws, v.substring(0,31));
+    XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(v));
   });
 
   XLSX.writeFile(wb, `APP_Analisis_NV_Programadas_${new Date().toISOString().slice(0,10)}.xlsx`);
