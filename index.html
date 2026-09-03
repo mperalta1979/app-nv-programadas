@@ -126,9 +126,13 @@
     background:var(--navy); color:#fff; text-align:left;
     padding:9px 10px; font-weight:600; white-space:nowrap;
   }
+  thead th:first-child{ position:sticky; left:0; z-index:3; }
   tbody td{padding:8px 10px; border-bottom:1px solid var(--line); white-space:nowrap;}
+  tbody td:first-child{ position:sticky; left:0; z-index:1; background:#fff; }
   tbody tr:hover{background:#f5f8fb;}
+  tbody tr:hover td:first-child{background:#f5f8fb;}
   tbody tr.totalrow{font-weight:800; background:#f5f8fb;}
+  tbody tr.totalrow td:first-child{background:#f5f8fb;}
   .tablewrap{max-height:520px; overflow:auto;}
 
   .tag{display:inline-block; padding:1px 7px; border-radius:20px; font-size:11px; font-weight:700; margin-left:5px;}
@@ -680,7 +684,7 @@ try{
    para mantenerse bajo el límite de 1MB por documento de Firestore. */
 const COLUMNAS_UTILES = ['fecha_emis','Numero_NVenta','nvEstado','CodAux','NomAux','Bloqueado','VenDes',
   'CodProd','DesProd','CodUMed','Saldo','Saldo$','QPROG','QPROGVAL','FPROG','Stock_2','Retira','Despachar',
-  'Retenida_Credito','Comuna_despacho','OPERACIÓN','NumOC'];
+  'Retenida_Credito','Comuna_despacho','Ciudad_despacho','OPERACIÓN','NumOC'];
 function trimirFilas(rows){
   return rows
     .filter(r => r && (r['nvEstado']==='A' || r['nvEstado']==='P'))
@@ -1652,6 +1656,7 @@ function procesarDatos(rows){
     despachar: (r['Despachar']||'').toString().trim(),
     retenida: (r['Retenida_Credito']||'').toString().trim(),
     comuna: r['Comuna_despacho'],
+    ciudad: r['Ciudad_despacho'],
   })).filter(r => r.nv !== undefined && r.nv !== null && r.codigo !== '');
 
   const vigentes = clean.filter(r =>
@@ -2082,6 +2087,7 @@ function procesarDatos(rows){
     const diasAtraso = Math.floor((hoySinHora.getTime() - r.fprogFecha.getTime()) / 86400000);
     return {
       nv:r.nv, nvEstado:r.nvEstado, codigo:r.codigo, producto:r.producto, cliente:r.cliente, vendedor:r.vendedor,
+      comuna:r.comuna, ciudad:r.ciudad,
       fechaProgramada:r.fprogFecha, diasAtraso, saldo:r.saldo, valor:r.saldoValor,
       estado: estadoTxt, semana: semanaLabel(r.fprogFecha), metodo: usaGuias ? 'guia' : 'saldo'
     };
@@ -3193,7 +3199,7 @@ function renderNoEfectuados(){
   }
   renderRetiroNoEfTable();
 
-  document.getElementById('despachoNoEfTable').innerHTML = tablaNoEfectuadoHtml(ne.despacho);
+  document.getElementById('despachoNoEfTable').innerHTML = tablaNoEfectuadoHtml(ne.despacho, true);
 
   const semanal = [];
   ne.retiroSemanal.forEach(s => semanal.push({...s, tipo:'Retiro'}));
@@ -3207,14 +3213,15 @@ function renderNoEfectuados(){
 
 }
 
-function tablaNoEfectuadoHtml(rows){
+function tablaNoEfectuadoHtml(rows, conComunaCiudad){
   if(!rows.length) return `<tbody><tr><td class="empty">Sin NV pendientes en esta categoría.</td></tr></tbody>`;
   return `
-    <thead><tr><th>NV</th><th>Código</th><th>Producto</th><th>Cliente</th><th>Vendedor</th><th>Fecha Programada</th><th>Días atraso</th><th>Saldo</th><th>Valor</th></tr></thead>
+    <thead><tr><th>NV</th><th>Código</th><th>Producto</th><th>Cliente</th><th>Vendedor</th>${conComunaCiudad?'<th>Comuna</th><th>Ciudad</th>':''}<th>Fecha Programada</th><th>Días atraso</th><th>Saldo</th><th>Valor</th></tr></thead>
     <tbody>
       ${rows.map(r=>`<tr style="background:#fbe6e3;">
         <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span></td>
         <td>${esc(r.codigo)}</td><td>${esc(r.producto)}</td><td>${esc(r.cliente)}</td><td>${esc(r.vendedor)}</td>
+        ${conComunaCiudad?`<td>${esc(r.comuna||'')}</td><td>${esc(r.ciudad||'')}</td>`:''}
         <td>${fmtFecha(r.fechaProgramada)}</td><td><strong>${r.diasAtraso}d</strong></td>
         <td>${num(r.saldo)}</td><td>${money(r.valor)}</td>
       </tr>`).join('')}
@@ -3237,12 +3244,14 @@ function renderRetiroNoEfTable(){
   document.getElementById('retiroNoEfTable').innerHTML = tablaNoEfectuadoHtml(rows);
 }
 
-function exportarNoEfectuadoExcel(rows, nombreArchivo, hojaNombre){
+function exportarNoEfectuadoExcel(rows, nombreArchivo, hojaNombre, conComunaCiudad){
   if(!rows.length){ alert('No hay datos para exportar.'); return; }
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(rows.map(r=>({
     'NV': r.nv, 'Estado NV': r.nvEstado, 'Código': r.codigo, 'Producto': r.producto,
-    'Cliente': r.cliente, 'Vendedor': r.vendedor, 'Fecha Programada': fmtFecha(r.fechaProgramada),
+    'Cliente': r.cliente, 'Vendedor': r.vendedor,
+    ...(conComunaCiudad ? {'Comuna': r.comuna||'', 'Ciudad': r.ciudad||''} : {}),
+    'Fecha Programada': fmtFecha(r.fechaProgramada),
     'Días de Atraso': r.diasAtraso, 'Saldo': r.saldo, 'Valor': r.valor, 'Estado': r.estado
   })));
   XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(hojaNombre));
@@ -3807,7 +3816,7 @@ document.getElementById('btnExportRetiroNoEf').addEventListener('click', () => {
   exportarNoEfectuadoExcel(rows, 'Retiro_No_Efectuado', 'Retiro No Efectuado');
 });
 document.getElementById('btnExportDespachoNoEf').addEventListener('click', () => {
-  exportarNoEfectuadoExcel(RESULT.noEfectuados.despacho, 'Despacho_No_Efectuado', 'Despacho No Efectuado');
+  exportarNoEfectuadoExcel(RESULT.noEfectuados.despacho, 'Despacho_No_Efectuado', 'Despacho No Efectuado', true);
 });
 document.getElementById('btnEnviarWhatsappRetiro').addEventListener('click', () => {
   const msg = armarMensajeRetiroNoEfectuado();
