@@ -372,19 +372,6 @@
       </div>
     </div>
 
-    <div class="panel" id="panelTendenciaDiferencia">
-      <div class="panel-head"><h2>📈 Tendencia — Diferencia semanal (A+P)</h2></div>
-      <div class="panel-body pad">
-        <div style="overflow-x:auto;">
-          <svg id="tendenciaSvg" width="100%" style="min-width:600px; display:block;"></svg>
-        </div>
-        <div class="tablewrap" style="margin-top:16px;">
-          <table id="tendenciaTable"></table>
-        </div>
-      </div>
-      <div class="assumption-note">Se registra un punto cada vez que el Admin carga un Excel de NV nuevo (un punto por día, se reemplaza si se carga más de una vez el mismo día). Agrupado por semana (lunes a domingo).</div>
-    </div>
-
     <div class="panel" id="panelResumenA">
       <div class="panel-head"><h2>Resumen Situación Notas de Venta — Aprobadas (A)</h2></div>
       <div class="panel-body pad">
@@ -1150,98 +1137,11 @@ let GUIAS_DATA = null; // {porNVCodigo: {'nv|codigo': [fechasISO...]}, devolucio
 let firebaseUnsubGuias = null;
 
 /* ============================================================
-   Historial de tendencia — snapshot diario de "Diferencia" (A+P)
+   Utilidad de fecha (usada por seguimiento y otros módulos)
    ============================================================ */
-const HISTORIAL_KEY = 'nvprog_historial_diferencia_v1';
-let HISTORIAL_DIFERENCIA = {}; // { 'YYYY-MM-DD': {cantidad, valor} }
-let firebaseUnsubHistorial = null;
-
 function fechaHoyISO(){
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
-function semanaLabelGlobal(fechaISO){
-  const d = new Date(fechaISO+'T00:00:00'); d.setHours(0,0,0,0);
-  const dia = d.getDay();
-  const offset = dia===0 ? -6 : 1-dia;
-  const lunes = new Date(d); lunes.setDate(d.getDate()+offset);
-  return `${String(lunes.getDate()).padStart(2,'0')}/${String(lunes.getMonth()+1).padStart(2,'0')}`;
-}
-function renderTendenciaDiferencia(){
-  const fechas = Object.keys(HISTORIAL_DIFERENCIA).sort();
-  if(fechas.length < 1){
-    document.getElementById('tendenciaSvg').innerHTML = `<text x="20" y="30" font-size="12" fill="#4a6f8a" font-family="Segoe UI, Arial">Aún no hay suficiente historial — vuelve a revisar en unos días.</text>`;
-    document.getElementById('tendenciaTable').innerHTML = '';
-    return;
-  }
-  // Agrupar por semana: se queda con el ultimo snapshot (fecha mas reciente) de cada semana
-  const porSemana = {};
-  fechas.forEach(f => {
-    const semana = semanaLabelGlobal(f);
-    porSemana[semana] = HISTORIAL_DIFERENCIA[f]; // como fechas viene ordenado asc, el ultimo sobreescribe
-  });
-  const semanasOrdenadas = Object.keys(porSemana); // ya en orden de aparicion (asc por fecha)
-  const puntos = semanasOrdenadas.map(s => porSemana[s]);
-
-  // Grafico de linea simple
-  const W = Math.max(500, semanasOrdenadas.length*80), H = 220, padL = 70, padR = 20, padT = 20, padB = 40;
-  const maxValor = Math.max(1, ...puntos.map(p=>p.valor));
-  const x = i => padL + (semanasOrdenadas.length<=1 ? 0 : i*(W-padL-padR)/(semanasOrdenadas.length-1));
-  const y = v => padT + (1 - v/maxValor) * (H-padT-padB);
-
-  let path = puntos.map((p,i) => `${i===0?'M':'L'} ${x(i).toFixed(1)},${y(p.valor).toFixed(1)}`).join(' ');
-  let svgContent = `<path d="${path}" fill="none" stroke="#2e75b6" stroke-width="2.5"/>`;
-  puntos.forEach((p,i) => {
-    svgContent += `<circle cx="${x(i).toFixed(1)}" cy="${y(p.valor).toFixed(1)}" r="4" fill="#1F4E78"><title>Semana del ${semanasOrdenadas[i]}: ${money(p.valor)} (${p.cantidad} NV)</title></circle>`;
-    svgContent += `<text x="${x(i).toFixed(1)}" y="${H-padB+18}" font-size="10.5" text-anchor="middle" fill="#4a6f8a" font-family="Segoe UI, Arial">${esc(semanasOrdenadas[i])}</text>`;
-  });
-  // Eje Y con 3 marcas
-  [0,0.5,1].forEach(f => {
-    const val = maxValor*f;
-    svgContent += `<text x="${padL-8}" y="${y(val).toFixed(1)+4}" font-size="10" text-anchor="end" fill="#4a6f8a" font-family="Segoe UI, Arial">${money(val)}</text>`;
-    svgContent += `<line x1="${padL}" y1="${y(val).toFixed(1)}" x2="${W-padR}" y2="${y(val).toFixed(1)}" stroke="#e5edf2" stroke-width="1"/>`;
-  });
-  const svg = document.getElementById('tendenciaSvg');
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.innerHTML = svgContent;
-
-  document.getElementById('tendenciaTable').innerHTML = `
-    <thead><tr><th>Semana (lunes)</th><th>NV en Diferencia</th><th>Valor</th></tr></thead>
-    <tbody>
-      ${semanasOrdenadas.map((s,i)=>`<tr><td>${esc(s)}</td><td>${puntos[i].cantidad}</td><td>${money(puntos[i].valor)}</td></tr>`).join('')}
-    </tbody>`;
-}
-
-function cargarHistorialLocal(){
-  try{ const raw = localStorage.getItem(HISTORIAL_KEY); return raw ? JSON.parse(raw) : {}; }catch(e){ return {}; }
-}
-function guardarHistorialLocal(obj){
-  try{ localStorage.setItem(HISTORIAL_KEY, JSON.stringify(obj)); }catch(e){}
-}
-function registrarSnapshotDiario(resultado){
-  const cantidad = resultado.resumenSituacionA.diferencia.cantidad + resultado.resumenSituacionP.diferencia.cantidad;
-  const valor = resultado.resumenSituacionA.diferencia.valor + resultado.resumenSituacionP.diferencia.valor;
-  HISTORIAL_DIFERENCIA[fechaHoyISO()] = {cantidad, valor};
-  guardarHistorialLocal(HISTORIAL_DIFERENCIA);
-  if(firebaseListo){
-    const update = {};
-    update['dias.'+fechaHoyISO()] = {cantidad, valor};
-    update.claveAdmin = FIREBASE_ADMIN_KEY;
-    firebaseDb.collection('nv_programadas').doc('historial_diferencia').set(update, {merge:true})
-      .catch(err => console.warn('No se pudo guardar el historial de tendencia:', err));
-  }
-}
-function suscribirseAHistorial(){
-  HISTORIAL_DIFERENCIA = cargarHistorialLocal();
-  if(!firebaseListo) return;
-  if(firebaseUnsubHistorial) firebaseUnsubHistorial();
-  firebaseUnsubHistorial = firebaseDb.collection('nv_programadas').doc('historial_diferencia').onSnapshot(doc => {
-    if(doc.exists && doc.data().dias){
-      HISTORIAL_DIFERENCIA = doc.data().dias;
-      guardarHistorialLocal(HISTORIAL_DIFERENCIA);
-      if(RESULT) renderTendenciaDiferencia();
-    }
-  }, err => console.warn('Error escuchando historial:', err));
 }
 
 
@@ -2146,7 +2046,6 @@ function render(){
   renderDashCards();
   renderGraficosDashboard();
   renderResumenSituacion();
-  renderTendenciaDiferencia();
   renderResumenRetail();
   renderDashVendorTable();
   renderBloqueados();
@@ -2780,7 +2679,6 @@ function logout(){
   if(firebaseUnsubSeguimiento){ firebaseUnsubSeguimiento(); firebaseUnsubSeguimiento = null; }
   if(firebaseUnsubRoles){ firebaseUnsubRoles(); firebaseUnsubRoles = null; }
   if(firebaseUnsubGuias){ firebaseUnsubGuias(); firebaseUnsubGuias = null; }
-  if(firebaseUnsubHistorial){ firebaseUnsubHistorial(); firebaseUnsubHistorial = null; }
   document.getElementById('loginWrap').classList.remove('hidden');
   document.getElementById('mainWrap').classList.add('hidden');
   document.getElementById('sesionBar').classList.add('hidden');
@@ -2824,7 +2722,6 @@ function aplicarSesion(){
   suscribirseASeguimiento();
   suscribirseARolesConfig();
   suscribirseAGuias();
-  suscribirseAHistorial();
 
   renderTabsNav();
   if(tienePermiso('accesoMaestro')){ renderUsersTable(); renderRolesConfigTable(); }
@@ -3764,7 +3661,6 @@ function handleFile(file){
     mostrarInfoDatosGuardados(file.name, NV_ROWS_ACTUAL_RAW.savedAt);
     guardarDatosEnNube(rowsNuevo, file.name); // sincroniza para todos los usuarios (desplaza actual->anterior en la nube también)
     actualizarSeguimientoSinProgramar(); // revisa NV que llevan +3 días sin programar y avisa por ntfy si corresponde
-    registrarSnapshotDiario(RESULT); // guarda el punto de hoy para el gráfico de tendencia semanal
     currentVendor = null;
     currentTipo = 'Retira Cliente';
     render();
