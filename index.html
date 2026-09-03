@@ -442,27 +442,6 @@
       </div>
     </div>
 
-    <div class="section-title" id="programableSectionTitle">Programable — cobertura de stock disponible</div>
-
-    <div class="panel" id="panelCoberturaVendedor">
-      <div class="panel-head"><h2>Análisis de cobertura por vendedor</h2></div>
-      <div class="tabs" id="vendorTabs"></div>
-      <div class="seg" id="tipoSeg">
-        <button data-tipo="Retira Cliente" class="active">Programable Retira Cliente</button>
-        <button data-tipo="Por Despachar">Programable Por Despachar</button>
-      </div>
-      <div class="vendor-actions" id="vendorActions"></div>
-      <div class="toolbar">
-        <input class="search" id="searchBox" placeholder="Buscar por código, producto, cliente o NV...">
-      </div>
-      <div class="panel-body">
-        <div class="tablewrap">
-          <table id="vendorTable"></table>
-        </div>
-      </div>
-      <div class="footer-note" id="vendorFootnote"></div>
-    </div>
-
     <div class="panel" id="panelRetenidas">
       <div class="panel-head">
         <h2>NV Retenidas por crédito (excluidas del análisis)</h2>
@@ -529,6 +508,29 @@
         </div>
       </div>
       <div class="footer-note" id="pdFootnote"></div>
+    </div>
+  </div>
+
+  <div id="tabCobertura" class="hidden">
+    <div class="section-title" id="programableSectionTitle">Programable — cobertura de stock disponible</div>
+
+    <div class="panel" id="panelCoberturaVendedor">
+      <div class="panel-head"><h2>Análisis de cobertura por vendedor</h2></div>
+      <div class="tabs" id="vendorTabs"></div>
+      <div class="seg" id="tipoSeg">
+        <button data-tipo="Retira Cliente" class="active">Programable Retira Cliente</button>
+        <button data-tipo="Por Despachar">Programable Por Despachar</button>
+      </div>
+      <div class="vendor-actions" id="vendorActions"></div>
+      <div class="toolbar">
+        <input class="search" id="searchBox" placeholder="Buscar por código, producto, cliente o NV...">
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="vendorTable"></table>
+        </div>
+      </div>
+      <div class="footer-note" id="vendorFootnote"></div>
     </div>
   </div>
 
@@ -1096,7 +1098,7 @@ const PERMISOS_DISPONIBLES = [
   {key:'verResumenP', label:'Ver Resumen Situación — Pendientes (P)'},
   {key:'verDashboardVendedor', label:'Ver Dashboard por vendedor'},
   {key:'verBloqueados', label:'Ver Clientes bloqueados'},
-  {key:'verCoberturaVendedor', label:'Ver Análisis de cobertura por vendedor'},
+  {key:'verCoberturaVendedor', label:'Ver pestaña Cobertura de Stock'},
   {key:'verRetenidas', label:'Ver NV Retenidas por crédito'},
   {key:'verResumenRetailA', label:'Ver Resumen Situación NV Retail — Aprobadas (A)'},
   {key:'verResumenRetailP', label:'Ver Resumen Situación NV Retail — Pendientes (P)'},
@@ -1104,15 +1106,15 @@ const PERMISOS_DISPONIBLES = [
 ];
 const ROLES_CONFIG_KEY = 'nvprog_roles_config_v1';
 function permisosVacios(){ const o={}; PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=false); return o; }
-const PANELES_ANALISIS = ['verResumenA','verResumenP','verResumenRetailA','verResumenRetailP','verDashboardVendedor','verBloqueados','verCoberturaVendedor','verRetenidas'];
+const PANELES_ANALISIS = ['verResumenA','verResumenP','verResumenRetailA','verResumenRetailP','verDashboardVendedor','verBloqueados','verRetenidas'];
 function permisosPanelesAnalisis(valor){ const o={}; PANELES_ANALISIS.forEach(k=>o[k]=valor); return o; }
 function seedRolesConfig(){
   return {
     admin: {label:'Administrador', permisos: (()=>{const o=permisosVacios(); PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=true); return o;})()},
     vendedor: {label:'Vendedor', permisos: {...permisosVacios(), verDespacho:true, verProduccion:true, exportarExcel:true, verNoEfectuados:true}},
-    gerencia_general: {label:'Gerencia General', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
-    gerencia_comercial: {label:'Gerencia Comercial', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
-    solo_lectura: {label:'Solo Lectura', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verProduccion:true, verTodasNV:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
+    gerencia_general: {label:'Gerencia General', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verCoberturaVendedor:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
+    gerencia_comercial: {label:'Gerencia Comercial', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verCoberturaVendedor:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
+    solo_lectura: {label:'Solo Lectura', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verCoberturaVendedor:true, verProduccion:true, verTodasNV:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
   };
 }
 function normalizarRolesConfig(cfg){
@@ -2129,15 +2131,13 @@ function procesarDatos(rows){
 function aplicarPermisosPanelesAnalisis(){
   const mapa = {
     panelResumenA:'verResumenA', panelResumenP:'verResumenP', panelResumenRetailA:'verResumenRetailA', panelResumenRetailP:'verResumenRetailP',
-    panelDashboardVendedor:'verDashboardVendedor', panelCoberturaVendedor:'verCoberturaVendedor',
+    panelDashboardVendedor:'verDashboardVendedor',
     panelRetenidas:'verRetenidas'
   };
   Object.keys(mapa).forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', !tienePermiso(mapa[id]));
   });
-  const tituloSeccion = document.getElementById('programableSectionTitle');
-  if(tituloSeccion) tituloSeccion.classList.toggle('hidden', !tienePermiso('verCoberturaVendedor'));
 }
 
 function render(){
@@ -2837,6 +2837,7 @@ function tabsDisponibles(){
   const tabs = [];
   if(tienePermiso('verAnalisis') || tienePermiso('verAnalisisPropio')) tabs.push({id:'tabAnalisis', label:'📊 Análisis'});
   if(tienePermiso('verDespacho')) tabs.push({id:'tabDespacho', label:'📅 Programa de Despacho'});
+  if(tienePermiso('verCoberturaVendedor')) tabs.push({id:'tabCobertura', label:'📦 Cobertura de Stock'});
   if(tienePermiso('verProduccion')) tabs.push({id:'tabProduccion', label:'🏭 Programa de Producción'});
   if(tienePermiso('verNoEfectuados')) tabs.push({id:'tabNoEfectuados', label:'⛔ No Efectuados'});
   if(tienePermiso('accesoMaestro')) tabs.push({id:'tabMaestro', label:'🔧 Maestro'});
@@ -2866,7 +2867,7 @@ function renderTabsNav(){
 }
 
 function aplicarTabActivo(){
-  ['tabAnalisis','tabDespacho','tabProduccion','tabNoEfectuados','tabMaestro'].forEach(id => {
+  ['tabAnalisis','tabDespacho','tabCobertura','tabProduccion','tabNoEfectuados','tabMaestro'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', id !== tabActivo);
   });
