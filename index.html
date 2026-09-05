@@ -3101,12 +3101,14 @@ function construirLineasProductivas(){
       const nivelMin = lineasDeEsteCodigo.length ? Math.min(...lineasDeEsteCodigo.map(l => l.nivel===null?99:l.nivel)) : null;
       const esCritico = lineasDeEsteCodigo.length > 0;
       const valorRiesgo = lineasDeEsteCodigo.reduce((s,l)=>s + (l.saldo - l.cubiertoPorStock) * (l.saldoValor / (l.saldo||1)), 0);
+      const valorTotalRiesgo = lineasDeEsteCodigo.reduce((s,l)=>s + l.saldoValor, 0);
       return {
         ...c,
         lineasProgramadas: lineasDeEsteCodigo,
         esCritico,
         nivel: esCritico ? (nivelMin===99?null:nivelMin) : null,
-        valorRiesgo
+        valorRiesgo,
+        valorTotalRiesgo
       };
     });
     const criticos = codigosDelDetalle.filter(c=>c.esCritico);
@@ -3115,6 +3117,7 @@ function construirLineasProductivas(){
       totalCodigos: codigosDelDetalle.length,
       codigosCriticos: criticos.length,
       valorRiesgoTotal: criticos.reduce((s,c)=>s+c.valorRiesgo,0),
+      valorTotalRiesgoTotal: criticos.reduce((s,c)=>s+c.valorTotalRiesgo,0),
       codigos: codigosDelDetalle.sort((a,b)=>(a.nivel??99)-(b.nivel??99))
     };
   }).sort((a,b)=>b.codigosCriticos-a.codigosCriticos);
@@ -3138,13 +3141,14 @@ function renderLineasProductivas(){
 
   const rows = LINEAS_PRODUCTIVAS.porMaquina;
   document.getElementById('lpMaquinasTable').innerHTML = `
-    <thead><tr><th>Máquina</th><th>Códigos totales</th><th>Códigos críticos</th><th>Valor en riesgo</th><th></th></tr></thead>
+    <thead><tr><th>Máquina</th><th>Códigos totales</th><th>Códigos críticos</th><th>Valor en riesgo</th><th>Valor total en riesgo</th><th></th></tr></thead>
     <tbody>
       ${rows.map(m=>`<tr ${m.codigosCriticos>0?'style="background:#fff4e9;"':''}>
         <td><strong>${esc(m.maquina)}</strong></td>
         <td>${m.totalCodigos}</td>
         <td>${m.codigosCriticos>0?`<strong style="color:var(--red);">${m.codigosCriticos}</strong>`:'0'}</td>
         <td>${money(m.valorRiesgoTotal)}</td>
+        <td>${money(m.valorTotalRiesgoTotal)}</td>
         <td><button class="btn btn-ghost btn-ver-lp" data-maquina="${esc(m.maquina)}" style="padding:4px 12px;">Ver detalle</button></td>
       </tr>`).join('')}
     </tbody>`;
@@ -3156,20 +3160,25 @@ function renderLineasProductivas(){
 function abrirDetalleLp(maquina){
   const m = LINEAS_PRODUCTIVAS.porMaquina.find(x=>x.maquina===maquina);
   if(!m) return;
-  document.getElementById('modalLpTitulo').textContent = `Máquina ${maquina} — ${m.codigosCriticos} código(s) crítico(s) · ${money(m.valorRiesgoTotal)} en riesgo`;
+  document.getElementById('modalLpTitulo').textContent = `Máquina ${maquina} — ${m.codigosCriticos} código(s) crítico(s) · ${money(m.valorRiesgoTotal)} en riesgo (${money(m.valorTotalRiesgoTotal)} total sin descontar stock)`;
   document.getElementById('lpDetalleTable').innerHTML = `
     <thead><tr>
-      <th>Código</th><th>Descripción</th><th>UM</th><th>Cant. a Fabricar</th><th>Nivel</th>
+      <th>Código</th><th>Descripción</th><th>UM</th><th>Cant. a Fabricar</th>
+      <th>Total Por Despachar</th><th>Total Retira Cliente</th><th>Nivel</th>
       <th>Programado Por Despachar</th><th>Programado Retira Cliente</th>
     </tr></thead>
     <tbody>
       ${m.codigos.map(c => {
         const despacho = c.lineasProgramadas.filter(l=>l.despachar==='Si');
         const retira = c.lineasProgramadas.filter(l=>l.retira==='Si');
-        const fmtLineas = arr => arr.length ? arr.map(l=>`NV ${l.nv} — ${esc(l.cliente)} (${num(l.saldo)}, ${money(l.saldoValor)})`).join('<br>') : '-';
+        const totalDespacho = {cant: despacho.reduce((s,l)=>s+l.saldo,0), valor: despacho.reduce((s,l)=>s+l.saldoValor,0)};
+        const totalRetira = {cant: retira.reduce((s,l)=>s+l.saldo,0), valor: retira.reduce((s,l)=>s+l.saldoValor,0)};
+        const fmtLineas = arr => arr.length ? arr.map(l=>`NV ${l.nv} — ${esc(l.cliente)} (${num(l.saldo)}, ${money(l.saldoValor)}) — FPROG ${fmtFecha(l.fprogFecha)}`).join('<br>') : '-';
         return `<tr style="background:${NIVEL_COLORES[c.nivel]};">
           <td>${esc(c.codigo)}</td><td>${esc(c.descripcion)}</td><td>${esc(c.um)}</td>
           <td>${num(c.cantidadFabricar)}</td>
+          <td>${totalDespacho.cant>0?`${num(totalDespacho.cant)} (${money(totalDespacho.valor)})`:'-'}</td>
+          <td>${totalRetira.cant>0?`${num(totalRetira.cant)} (${money(totalRetira.valor)})`:'-'}</td>
           <td>${c.esCritico ? esc(NIVEL_LABELS[c.nivel]) : (c.lineasProgramadas.length?'Sin nivel (informativo)':'-')}</td>
           <td style="font-size:11.5px;">${fmtLineas(despacho)}</td>
           <td style="font-size:11.5px;">${fmtLineas(retira)}</td>
@@ -3183,7 +3192,7 @@ function exportarLpMaquinasExcel(){
   if(!LINEAS_PRODUCTIVAS) return;
   const wb = XLSX.utils.book_new();
   const filasResumen = LINEAS_PRODUCTIVAS.porMaquina.map(m => ({
-    'Máquina': m.maquina, 'Códigos Totales': m.totalCodigos, 'Códigos Críticos': m.codigosCriticos, 'Valor en Riesgo': m.valorRiesgoTotal
+    'Máquina': m.maquina, 'Códigos Totales': m.totalCodigos, 'Códigos Críticos': m.codigosCriticos, 'Valor en Riesgo': m.valorRiesgoTotal, 'Valor Total en Riesgo': m.valorTotalRiesgoTotal
   }));
   const wsResumen = XLSX.utils.json_to_sheet(filasResumen);
   XLSX.utils.book_append_sheet(wb, wsResumen, sanitizarNombreHoja('Resumen Maquinas'));
