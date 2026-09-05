@@ -566,6 +566,42 @@
     </div>
   </div>
 
+  <div id="tabLineasProductivas" class="hidden">
+    <div class="section-title">Líneas Productivas — cruce Producción vs NV Programadas</div>
+    <div id="lpEstadoNota" class="assumption-note"></div>
+
+    <div class="panel" id="panelLpMaquinas">
+      <div class="panel-head">
+        <h2>🏭 Máquinas — códigos críticos</h2>
+        <button class="btn btn-export" id="btnExportLpMaquinas">⬇ Exportar Excel</button>
+      </div>
+      <div class="panel-body">
+        <div class="tablewrap">
+          <table id="lpMaquinasTable"></table>
+        </div>
+      </div>
+      <div class="assumption-note">
+        <strong>Crítica Nivel 0</strong> = programado para esta semana o ya vencido · <strong>Nivel 1</strong> = próxima semana · <strong>Nivel 2</strong> = subsiguiente · <strong>Nivel 3</strong> = sub-subsiguiente.
+        Solo cuenta como crítico lo que <strong>no</strong> está cubierto por stock disponible (B2+B7) — si ya hay stock suficiente, no depende de que la máquina cumpla.
+        Códigos programados más allá de la semana 3 se muestran igual, pero sin nivel de criticidad (informativo).
+      </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="modalLpDetalle">
+      <div class="modal-box" style="max-width:1100px;">
+        <div class="modal-head">
+          <h2 id="modalLpTitulo">Detalle</h2>
+          <button class="modal-close" id="btnCerrarModalLp">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="tablewrap" style="max-height:520px;">
+            <table id="lpDetalleTable"></table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="tabNoEfectuados" class="hidden">
     <div class="section-title">Retiro / Despacho No Efectuado</div>
     <div id="guiasEstadoNota" class="assumption-note"></div>
@@ -672,7 +708,7 @@ try{
 /* Solo se guardan/sincronizan las columnas que la app realmente usa,
    para mantenerse bajo el límite de 1MB por documento de Firestore. */
 const COLUMNAS_UTILES = ['fecha_emis','Numero_NVenta','nvEstado','CodAux','NomAux','Bloqueado','VenDes',
-  'CodProd','DesProd','CodUMed','Saldo','Saldo$','QPROG','QPROGVAL','FPROG','Stock_2','Retira','Despachar',
+  'CodProd','DesProd','CodUMed','Saldo','Saldo$','QPROG','QPROGVAL','FPROG','Stock_2','Stock_7','Retira','Despachar',
   'Retenida_Credito','Comuna_despacho','Ciudad_despacho','OPERACIÓN','NumOC'];
 function trimirFilas(rows){
   return rows
@@ -1090,6 +1126,7 @@ const PERMISOS_DISPONIBLES = [
   {key:'verResumenRetailA', label:'Ver Resumen Situación NV Retail — Aprobadas (A)'},
   {key:'verResumenRetailP', label:'Ver Resumen Situación NV Retail — Pendientes (P)'},
   {key:'verNoEfectuados', label:'Ver Retiro/Despacho No Efectuado'},
+  {key:'verLineasProductivas', label:'Ver Líneas Productivas'},
 ];
 const ROLES_CONFIG_KEY = 'nvprog_roles_config_v1';
 function permisosVacios(){ const o={}; PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=false); return o; }
@@ -1099,9 +1136,9 @@ function seedRolesConfig(){
   return {
     admin: {label:'Administrador', permisos: (()=>{const o=permisosVacios(); PERMISOS_DISPONIBLES.forEach(p=>o[p.key]=true); return o;})()},
     vendedor: {label:'Vendedor', permisos: {...permisosVacios(), verDespacho:true, verProduccion:true, exportarExcel:true, verNoEfectuados:true}},
-    gerencia_general: {label:'Gerencia General', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verCoberturaVendedor:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
-    gerencia_comercial: {label:'Gerencia Comercial', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verCoberturaVendedor:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
-    solo_lectura: {label:'Solo Lectura', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verCoberturaVendedor:true, verProduccion:true, verTodasNV:true, exportarExcel:true, verNoEfectuados:true, ...permisosPanelesAnalisis(true)}},
+    gerencia_general: {label:'Gerencia General', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verCoberturaVendedor:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, verLineasProductivas:true, ...permisosPanelesAnalisis(true)}},
+    gerencia_comercial: {label:'Gerencia Comercial', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verCoberturaVendedor:true, verProduccion:true, verTodasNV:true, editarRetencion:true, exportarExcel:true, verNoEfectuados:true, verLineasProductivas:true, ...permisosPanelesAnalisis(true)}},
+    solo_lectura: {label:'Solo Lectura', permisos: {...permisosVacios(), verAnalisis:true, verDespacho:true, verCoberturaVendedor:true, verProduccion:true, verTodasNV:true, exportarExcel:true, verNoEfectuados:true, verLineasProductivas:true, ...permisosPanelesAnalisis(true)}},
   };
 }
 function normalizarRolesConfig(cfg){
@@ -1554,6 +1591,7 @@ function procesarDatos(rows){
     programada: excelSerialToDate(r['FPROG']) !== null,
     operacion: normalizarOperacion(r['OPERACIÓN']),
     stock2: (r['Stock_2']===undefined || r['Stock_2']===null || r['Stock_2']==='') ? null : Number(r['Stock_2']),
+    stock7: (r['Stock_7']===undefined || r['Stock_7']===null || r['Stock_7']==='') ? null : Number(r['Stock_7']),
     retira: (r['Retira']||'').toString().trim(),
     despachar: (r['Despachar']||'').toString().trim(),
     retenida: (r['Retenida_Credito']||'').toString().trim(),
@@ -2022,7 +2060,16 @@ function procesarDatos(rows){
     usaGuias,
   };
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion, nvSaldoCero };
+  /* -------- Líneas para el cruce con Producción (Líneas Productivas) -------- */
+  const lineasParaProductivas = disponibles
+    .filter(r => r.retenida !== 'Si' && r.saldo > 0 && (r.retira === 'Si' || r.despachar === 'Si'))
+    .map(r => ({
+      codigo: r.codigo, nv: r.nv, nvEstado: r.nvEstado, cliente: r.cliente, vendedor: r.vendedor,
+      retira: r.retira, despachar: r.despachar, saldo: r.saldo, saldoValor: r.saldoValor,
+      fprogFecha: r.fprogFecha, stock2: r.stock2, stock7: r.stock7
+    }));
+
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion, nvSaldoCero, lineasParaProductivas };
 }
 
 /* ============================================================
@@ -2047,6 +2094,7 @@ function render(){
   renderGraficosDashboard();
   renderResumenSituacion();
   renderResumenRetail();
+  renderLineasProductivas();
   renderDashVendorTable();
   renderBloqueados();
   renderTabs();
@@ -2737,13 +2785,14 @@ function tabsDisponibles(){
   if(tienePermiso('verCoberturaVendedor')) tabs.push({id:'tabCobertura', label:'📦 Cobertura de Stock'});
   if(tienePermiso('verProduccion')) tabs.push({id:'tabProduccion', label:'🏭 Programa de Producción'});
   if(tienePermiso('verNoEfectuados')) tabs.push({id:'tabNoEfectuados', label:'⛔ No Efectuados'});
+  if(tienePermiso('verLineasProductivas')) tabs.push({id:'tabLineasProductivas', label:'🏗️ Líneas Productivas'});
   if(tienePermiso('accesoMaestro')) tabs.push({id:'tabMaestro', label:'🔧 Maestro'});
   return tabs;
 }
 
 function renderTabsNav(){
   const puedeExportar = tienePermiso('exportarExcel');
-  ['btnExportRetenidas','pdExportBtn','prodExportBtn','btnExportRetiroNoEf','btnExportDespachoNoEf'].forEach(id => {
+  ['btnExportRetenidas','pdExportBtn','prodExportBtn','btnExportRetiroNoEf','btnExportDespachoNoEf','btnExportLpMaquinas'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', !puedeExportar);
   });
@@ -2764,7 +2813,7 @@ function renderTabsNav(){
 }
 
 function aplicarTabActivo(){
-  ['tabAnalisis','tabDespacho','tabCobertura','tabProduccion','tabNoEfectuados','tabMaestro'].forEach(id => {
+  ['tabAnalisis','tabDespacho','tabCobertura','tabProduccion','tabNoEfectuados','tabLineasProductivas','tabMaestro'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', id !== tabActivo);
   });
@@ -2993,6 +3042,170 @@ function inicioSemanaActual(){
   domingo.setHours(23,59,59,999);
   return {lunes, domingo};
 }
+/* ============================================================
+   Líneas Productivas — cruce Programa de Producción vs NV Programadas
+   ============================================================ */
+let LINEAS_PRODUCTIVAS = null;
+
+function clasificarSemanaCritica(fecha){
+  if(!fecha) return null;
+  const {domingo} = inicioSemanaActual();
+  const f = fecha.getTime();
+  if(f <= domingo.getTime()) return 0; // esta semana o vencido
+  for(let n=1; n<=3; n++){
+    const inicioN = new Date(domingo); inicioN.setDate(domingo.getDate() + (n-1)*7 + 1);
+    const finN = new Date(domingo); finN.setDate(domingo.getDate() + n*7);
+    if(f >= inicioN.getTime() && f <= finN.getTime()) return n;
+  }
+  return null; // semana 4 en adelante: informativo, sin nivel
+}
+
+function construirLineasProductivas(){
+  if(!RESULT || !RESULT_PROD) return null;
+  const lineas = RESULT.lineasParaProductivas || [];
+  const lineasPorCodigo = {};
+  lineas.forEach(r => {
+    if(!r.fprogFecha || r.saldo <= 0) return;
+    if(r.retira !== 'Si' && r.despachar !== 'Si') return;
+    if(!lineasPorCodigo[r.codigo]) lineasPorCodigo[r.codigo] = [];
+    lineasPorCodigo[r.codigo].push(r);
+  });
+
+  // 2) Por cada código, repartir el stock disponible (B2+B7) entre sus líneas programadas por fecha (más antigua primero)
+  const detalleLineas = []; // una entrada por línea de NV programada, con si necesita produccion o no
+  Object.keys(lineasPorCodigo).forEach(codigo => {
+    const arr = lineasPorCodigo[codigo].slice().sort((a,b)=>a.fprogFecha.getTime()-b.fprogFecha.getTime());
+    let stockDisp = (arr[0].stock2||0) + (arr[0].stock7||0);
+    arr.forEach(r => {
+      const cubierto = Math.min(stockDisp, r.saldo);
+      stockDisp -= cubierto;
+      const necesitaProduccion = cubierto < r.saldo;
+      detalleLineas.push({...r, cubiertoPorStock: cubierto, necesitaProduccion, nivel: necesitaProduccion ? clasificarSemanaCritica(r.fprogFecha) : null});
+    });
+  });
+
+  // 3) Cruce con Producción: por cada lote de RESULT_PROD, ver si su código tiene líneas críticas
+  const porMaquina = {};
+  RESULT_PROD.lotes.forEach(lote => {
+    if(!porMaquina[lote.maquina]) porMaquina[lote.maquina] = {maquina: lote.maquina, codigos: {}};
+    if(!porMaquina[lote.maquina].codigos[lote.codigo]) porMaquina[lote.maquina].codigos[lote.codigo] = {
+      codigo: lote.codigo, descripcion: lote.descripcion, um: lote.um, cantidadFabricar: 0, lotes: []
+    };
+    porMaquina[lote.maquina].codigos[lote.codigo].cantidadFabricar += (lote.cantidadLote||0);
+    porMaquina[lote.maquina].codigos[lote.codigo].lotes.push(lote);
+  });
+
+  const resumenMaquinas = Object.values(porMaquina).map(m => {
+    const codigosDelDetalle = Object.values(m.codigos).map(c => {
+      const lineasDeEsteCodigo = detalleLineas.filter(l => l.codigo === c.codigo && l.necesitaProduccion);
+      const nivelMin = lineasDeEsteCodigo.length ? Math.min(...lineasDeEsteCodigo.map(l => l.nivel===null?99:l.nivel)) : null;
+      const esCritico = lineasDeEsteCodigo.length > 0;
+      const valorRiesgo = lineasDeEsteCodigo.reduce((s,l)=>s + (l.saldo - l.cubiertoPorStock) * (l.saldoValor / (l.saldo||1)), 0);
+      return {
+        ...c,
+        lineasProgramadas: lineasDeEsteCodigo,
+        esCritico,
+        nivel: esCritico ? (nivelMin===99?null:nivelMin) : null,
+        valorRiesgo
+      };
+    });
+    const criticos = codigosDelDetalle.filter(c=>c.esCritico);
+    return {
+      maquina: m.maquina,
+      totalCodigos: codigosDelDetalle.length,
+      codigosCriticos: criticos.length,
+      valorRiesgoTotal: criticos.reduce((s,c)=>s+c.valorRiesgo,0),
+      codigos: codigosDelDetalle.sort((a,b)=>(a.nivel??99)-(b.nivel??99))
+    };
+  }).sort((a,b)=>b.codigosCriticos-a.codigosCriticos);
+
+  return {porMaquina: resumenMaquinas};
+}
+
+const NIVEL_LABELS = {0:'🔴 Nivel 0 (urgente)', 1:'🟠 Nivel 1', 2:'🟡 Nivel 2', 3:'🔵 Nivel 3', null:'—'};
+const NIVEL_COLORES = {0:'#f5c2c2', 1:'#fbe0c2', 2:'#fdf0c2', 3:'#d6e8fb', null:'#f2f2f2'};
+
+function renderLineasProductivas(){
+  const nota = document.getElementById('lpEstadoNota');
+  if(!RESULT || !RESULT_PROD){
+    nota.textContent = '⚠️ Se necesita tener cargados tanto el Excel de NV como el Programa de Producción para hacer este cruce.';
+    document.getElementById('lpMaquinasTable').innerHTML = `<tbody><tr><td class="empty">Faltan datos.</td></tr></tbody>`;
+    return;
+  }
+  LINEAS_PRODUCTIVAS = construirLineasProductivas();
+  if(!LINEAS_PRODUCTIVAS) return;
+  nota.textContent = `Cruce calculado sobre ${LINEAS_PRODUCTIVAS.porMaquina.length} máquinas.`;
+
+  const rows = LINEAS_PRODUCTIVAS.porMaquina;
+  document.getElementById('lpMaquinasTable').innerHTML = `
+    <thead><tr><th>Máquina</th><th>Códigos totales</th><th>Códigos críticos</th><th>Valor en riesgo</th><th></th></tr></thead>
+    <tbody>
+      ${rows.map(m=>`<tr ${m.codigosCriticos>0?'style="background:#fff4e9;"':''}>
+        <td><strong>${esc(m.maquina)}</strong></td>
+        <td>${m.totalCodigos}</td>
+        <td>${m.codigosCriticos>0?`<strong style="color:var(--red);">${m.codigosCriticos}</strong>`:'0'}</td>
+        <td>${money(m.valorRiesgoTotal)}</td>
+        <td><button class="btn btn-ghost btn-ver-lp" data-maquina="${esc(m.maquina)}" style="padding:4px 12px;">Ver detalle</button></td>
+      </tr>`).join('')}
+    </tbody>`;
+  document.querySelectorAll('.btn-ver-lp').forEach(btn => btn.addEventListener('click', () => {
+    abrirDetalleLp(btn.getAttribute('data-maquina'));
+  }));
+}
+
+function abrirDetalleLp(maquina){
+  const m = LINEAS_PRODUCTIVAS.porMaquina.find(x=>x.maquina===maquina);
+  if(!m) return;
+  document.getElementById('modalLpTitulo').textContent = `Máquina ${maquina} — ${m.codigosCriticos} código(s) crítico(s) · ${money(m.valorRiesgoTotal)} en riesgo`;
+  document.getElementById('lpDetalleTable').innerHTML = `
+    <thead><tr>
+      <th>Código</th><th>Descripción</th><th>UM</th><th>Cant. a Fabricar</th><th>Nivel</th>
+      <th>Programado Por Despachar</th><th>Programado Retira Cliente</th>
+    </tr></thead>
+    <tbody>
+      ${m.codigos.map(c => {
+        const despacho = c.lineasProgramadas.filter(l=>l.despachar==='Si');
+        const retira = c.lineasProgramadas.filter(l=>l.retira==='Si');
+        const fmtLineas = arr => arr.length ? arr.map(l=>`NV ${l.nv} — ${esc(l.cliente)} (${num(l.saldo)}, ${money(l.saldoValor)})`).join('<br>') : '-';
+        return `<tr style="background:${NIVEL_COLORES[c.nivel]};">
+          <td>${esc(c.codigo)}</td><td>${esc(c.descripcion)}</td><td>${esc(c.um)}</td>
+          <td>${num(c.cantidadFabricar)}</td>
+          <td>${c.esCritico ? esc(NIVEL_LABELS[c.nivel]) : (c.lineasProgramadas.length?'Sin nivel (informativo)':'-')}</td>
+          <td style="font-size:11.5px;">${fmtLineas(despacho)}</td>
+          <td style="font-size:11.5px;">${fmtLineas(retira)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>`;
+  document.getElementById('modalLpDetalle').classList.remove('hidden');
+}
+
+function exportarLpMaquinasExcel(){
+  if(!LINEAS_PRODUCTIVAS) return;
+  const wb = XLSX.utils.book_new();
+  const filasResumen = LINEAS_PRODUCTIVAS.porMaquina.map(m => ({
+    'Máquina': m.maquina, 'Códigos Totales': m.totalCodigos, 'Códigos Críticos': m.codigosCriticos, 'Valor en Riesgo': m.valorRiesgoTotal
+  }));
+  const wsResumen = XLSX.utils.json_to_sheet(filasResumen);
+  XLSX.utils.book_append_sheet(wb, wsResumen, sanitizarNombreHoja('Resumen Maquinas'));
+
+  const filasDetalle = [];
+  LINEAS_PRODUCTIVAS.porMaquina.forEach(m => {
+    m.codigos.filter(c=>c.esCritico || c.lineasProgramadas.length).forEach(c => {
+      c.lineasProgramadas.forEach(l => {
+        filasDetalle.push({
+          'Máquina': m.maquina, 'Código': c.codigo, 'Descripción': c.descripcion, 'UM': c.um,
+          'Cant. a Fabricar': c.cantidadFabricar, 'Nivel': c.esCritico ? (NIVEL_LABELS[c.nivel]||'') : 'Sin nivel',
+          'NV': l.nv, 'Cliente': l.cliente, 'Tipo': l.despachar==='Si'?'Por Despachar':'Retira Cliente',
+          'Cantidad Pendiente': l.saldo, 'Valor': l.saldoValor, 'Fecha Programada': fmtFecha(l.fprogFecha)
+        });
+      });
+    });
+  });
+  const wsDetalle = XLSX.utils.json_to_sheet(filasDetalle);
+  XLSX.utils.book_append_sheet(wb, wsDetalle, sanitizarNombreHoja('Detalle'));
+  XLSX.writeFile(wb, `Lineas_Productivas_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 function esSemanaActual(fecha){
   if(!fecha) return false;
   const {lunes, domingo} = inicioSemanaActual();
@@ -3159,6 +3372,7 @@ function exportarNoEfectuadoExcel(rows, nombreArchivo, hojaNombre, conComunaCiud
 function renderProduccion(){
   document.getElementById('prodUploadWrap').classList.toggle('hidden', !tienePermiso('cargarExcelProduccion'));
   document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || tienePermiso('cargarExcelProduccion'));
+  renderLineasProductivas();
   if(!RESULT_PROD) return;
   document.getElementById('prodPanel').classList.remove('hidden');
   renderProdCards();
@@ -3731,6 +3945,13 @@ document.getElementById('btnEnviarEmailRetiro').addEventListener('click', () => 
   window.location.href = `mailto:${contacto[0].email}?subject=${subject}&body=${encodeURIComponent(msg)}`;
 });
 document.getElementById('btnGenerarReportePDF').addEventListener('click', generarReportePDF);
+document.getElementById('btnExportLpMaquinas').addEventListener('click', exportarLpMaquinasExcel);
+document.getElementById('btnCerrarModalLp').addEventListener('click', () => {
+  document.getElementById('modalLpDetalle').classList.add('hidden');
+});
+document.getElementById('modalLpDetalle').addEventListener('click', (e) => {
+  if(e.target.id === 'modalLpDetalle') document.getElementById('modalLpDetalle').classList.add('hidden');
+});
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
