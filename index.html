@@ -2066,6 +2066,7 @@ function procesarDatos(rows){
     .map(r => ({
       codigo: r.codigo, nv: r.nv, nvEstado: r.nvEstado, cliente: r.cliente, vendedor: r.vendedor,
       retira: r.retira, despachar: r.despachar, saldo: r.saldo, saldoValor: r.saldoValor,
+      qprog: r.qprog, qprogValor: r.qprogValor,
       fprogFecha: r.fprogFecha, stock2: r.stock2, stock7: r.stock7
     }));
 
@@ -3171,14 +3172,20 @@ function abrirDetalleLp(maquina){
       ${m.codigos.map(c => {
         const despacho = c.lineasProgramadas.filter(l=>l.despachar==='Si');
         const retira = c.lineasProgramadas.filter(l=>l.retira==='Si');
-        const totalDespacho = {cant: despacho.reduce((s,l)=>s+l.saldo,0), valor: despacho.reduce((s,l)=>s+l.saldoValor,0)};
-        const totalRetira = {cant: retira.reduce((s,l)=>s+l.saldo,0), valor: retira.reduce((s,l)=>s+l.saldoValor,0)};
-        const fmtLineas = arr => arr.length ? arr.map(l=>`NV ${l.nv} — ${esc(l.cliente)} (${num(l.saldo)}, ${money(l.saldoValor)}) — FPROG ${fmtFecha(l.fprogFecha)}`).join('<br>') : '-';
+        const totalDespacho = {
+          cant: despacho.reduce((s,l)=>s+l.saldo,0), valor: despacho.reduce((s,l)=>s+l.saldoValor,0),
+          qprog: despacho.reduce((s,l)=>s+(l.qprog||0),0), qprogValor: despacho.reduce((s,l)=>s+(l.qprogValor||0),0)
+        };
+        const totalRetira = {
+          cant: retira.reduce((s,l)=>s+l.saldo,0), valor: retira.reduce((s,l)=>s+l.saldoValor,0),
+          qprog: retira.reduce((s,l)=>s+(l.qprog||0),0), qprogValor: retira.reduce((s,l)=>s+(l.qprogValor||0),0)
+        };
+        const fmtLineas = arr => arr.length ? arr.map(l=>`NV ${l.nv} — ${esc(l.cliente)} (Saldo: ${num(l.saldo)}, ${money(l.saldoValor)} · QPROG: ${num(l.qprog||0)}, ${money(l.qprogValor||0)}) — FPROG ${fmtFecha(l.fprogFecha)}`).join('<br>') : '-';
         return `<tr style="background:${NIVEL_COLORES[c.nivel]};">
           <td>${esc(c.codigo)}</td><td>${esc(c.descripcion)}</td><td>${esc(c.um)}</td>
           <td>${num(c.cantidadFabricar)}</td>
-          <td>${totalDespacho.cant>0?`${num(totalDespacho.cant)} (${money(totalDespacho.valor)})`:'-'}</td>
-          <td>${totalRetira.cant>0?`${num(totalRetira.cant)} (${money(totalRetira.valor)})`:'-'}</td>
+          <td>${totalDespacho.cant>0?`Saldo: ${num(totalDespacho.cant)} (${money(totalDespacho.valor)})<br>QPROG: ${num(totalDespacho.qprog)} (${money(totalDespacho.qprogValor)})`:'-'}</td>
+          <td>${totalRetira.cant>0?`Saldo: ${num(totalRetira.cant)} (${money(totalRetira.valor)})<br>QPROG: ${num(totalRetira.qprog)} (${money(totalRetira.qprogValor)})`:'-'}</td>
           <td>${c.esCritico ? esc(NIVEL_LABELS[c.nivel]) : (c.lineasProgramadas.length?'Sin nivel (informativo)':'-')}</td>
           <td style="font-size:11.5px;">${fmtLineas(despacho)}</td>
           <td style="font-size:11.5px;">${fmtLineas(retira)}</td>
@@ -3205,7 +3212,9 @@ function exportarLpMaquinasExcel(){
           'Máquina': m.maquina, 'Código': c.codigo, 'Descripción': c.descripcion, 'UM': c.um,
           'Cant. a Fabricar': c.cantidadFabricar, 'Nivel': c.esCritico ? (NIVEL_LABELS[c.nivel]||'') : 'Sin nivel',
           'NV': l.nv, 'Cliente': l.cliente, 'Tipo': l.despachar==='Si'?'Por Despachar':'Retira Cliente',
-          'Cantidad Pendiente': l.saldo, 'Valor': l.saldoValor, 'Fecha Programada': fmtFecha(l.fprogFecha)
+          'Cantidad Pendiente (Saldo)': l.saldo, 'Valor Saldo': l.saldoValor,
+          'Cantidad QPROG': l.qprog||0, 'Valor QPROGVAL': l.qprogValor||0,
+          'Fecha Programada': fmtFecha(l.fprogFecha)
         });
       });
     });
