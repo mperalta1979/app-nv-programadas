@@ -1088,6 +1088,17 @@ function calcularDiffProduccion(lotesAnterior, lotesActual){
   return {nuevos, eliminados, modificados};
 }
 
+/* Firestore no permite "arrays dentro de arrays" directamente. El Programa de Producción se procesa
+   como una tabla cruda (array de arrays), así que hay que envolver cada fila en un objeto antes de
+   guardar, y desenvolverla de vuelta al leer. */
+function aoaParaFirestore(aoa){
+  return (aoa||[]).map(fila => ({row: fila}));
+}
+function aoaDesdeFirestore(datos){
+  if(!datos) return null;
+  return datos.map(item => (item && item.row !== undefined) ? item.row : item); // compatible con formato viejo por si acaso
+}
+
 function guardarProduccionEnNube(aoaNuevo, filenameNuevo){
   if(!firebaseListo){ actualizarEstadoSyncProd('local', 'Firebase no configurado — datos solo en este navegador'); return Promise.resolve(false); }
   actualizarEstadoSyncProd('cargando', 'Subiendo a la nube...');
@@ -1095,8 +1106,8 @@ function guardarProduccionEnNube(aoaNuevo, filenameNuevo){
   return docRef.get().then(snap => {
     const previo = snap.exists ? snap.data() : null;
     const payload = {
-      aoaActual: aoaNuevo, filenameActual: filenameNuevo, savedAtActual: new Date().toISOString(),
-      aoaAnterior: previo ? (previo.aoaActual || null) : null,
+      aoaActual: aoaParaFirestore(aoaNuevo), filenameActual: filenameNuevo, savedAtActual: new Date().toISOString(),
+      aoaAnterior: previo ? (previo.aoaActual || null) : null, // ya viene envuelto desde Firestore si se guardó con este mismo formato
       filenameAnterior: previo ? (previo.filenameActual || null) : null,
       savedAtAnterior: previo ? (previo.savedAtActual || null) : null,
       subidoPor: sesion ? sesion.username : 'desconocido', claveAdmin: FIREBASE_ADMIN_KEY
@@ -1123,7 +1134,14 @@ function suscribirseAProduccionNube(){
   if(firebaseUnsubProd) firebaseUnsubProd();
   firebaseUnsubProd = firebaseDb.collection('nv_programadas').doc('produccion').onSnapshot(doc => {
     if(!doc.exists || !doc.data().aoaActual){ actualizarEstadoSyncProd('local', 'Aún no hay Programa de Producción cargado'); return; }
-    const data = doc.data();
+    const dataCruda = doc.data();
+    // Firestore guarda las filas envueltas (por la restricción de "arrays anidados") — se desenvuelven acá,
+    // así el resto de la app (localStorage, procesarProduccion, etc.) sigue trabajando con el formato crudo de siempre.
+    const data = {
+      ...dataCruda,
+      aoaActual: aoaDesdeFirestore(dataCruda.aoaActual),
+      aoaAnterior: dataCruda.aoaAnterior ? aoaDesdeFirestore(dataCruda.aoaAnterior) : null
+    };
     aplicarDatosProduccion(data);
     actualizarEstadoSyncProd('ok', `Sincronizado (${data.subidoPor||'admin'} · ${fmtFecha(new Date(data.savedAtActual))})`);
     if(sesion) renderProduccion();
@@ -1484,6 +1502,14 @@ function suscribirseAUsuarios(){
     }
   }, err => console.warn('Error escuchando usuarios:', err));
 }
+/* Limpieza de claves obsoletas de localStorage (de versiones anteriores del esquema, "_v1" reemplazadas por "_v2")
+   que quedaban huérfanas ocupando espacio sin ningún uso, y podían llenar la cuota del navegador. */
+(function limpiarClavesObsoletasLocalStorage(){
+  ['nvprog_datos_v1', 'nvprog_produccion_v1'].forEach(k => {
+    try{ if(localStorage.getItem(k) !== null) localStorage.removeItem(k); }catch(e){}
+  });
+})();
+
 let sesion = null; // {username, role, vendedor}
 let USERS = cargarUsuarios();
 
@@ -4125,7 +4151,19 @@ function guardarDatosCargados(paquete){
     localStorage.setItem(DATOS_KEY, JSON.stringify(paquete));
     return true;
   }catch(e){
-    console.warn('No se pudo guardar el archivo cargado en localStorage:', e);
+    console.warn('No se pudo guardar el archivo cargado en localStorage (probablemente cuota llena):', e);
+    // Reintento: rowsAnterior es el campo más pesado y menos crítico (solo sirve para comparar diferencias) —
+    // se descarta para liberar espacio y asegurar que al menos los datos ACTUALES queden respaldados localmente.
+    if(paquete && paquete.rowsAnterior){
+      try{
+        const paqueteReducido = {...paquete, rowsAnterior: null, filenameAnterior: null, savedAtAnterior: null};
+        localStorage.setItem(DATOS_KEY, JSON.stringify(paqueteReducido));
+        console.warn('Se guardó una versión reducida (sin histórico "anterior") por falta de espacio en el navegador.');
+        return true;
+      }catch(e2){
+        console.warn('Tampoco se pudo guardar la versión reducida:', e2);
+      }
+    }
     return false;
   }
 }
