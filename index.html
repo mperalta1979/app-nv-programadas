@@ -2070,7 +2070,17 @@ function procesarDatos(rows){
       fprogFecha: r.fprogFecha, stock2: r.stock2, stock7: r.stock7
     }));
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion, nvSaldoCero, lineasParaProductivas };
+  /* -------- Líneas amplias para "posible fabricación de stock" (incluye retenidas y bloqueadas) -------- */
+  const lineasParaFabricacionPosible = vigentes
+    .filter(r => r.saldo > 0 && (r.retira === 'Si' || r.despachar === 'Si'))
+    .map(r => ({
+      codigo: r.codigo, nv: r.nv, nvEstado: r.nvEstado, cliente: r.cliente, vendedor: r.vendedor,
+      retira: r.retira, despachar: r.despachar, saldo: r.saldo, saldoValor: r.saldoValor,
+      qprog: r.qprog, qprogValor: r.qprogValor, fechaEmis: r.fecha_dt,
+      retenida: r.retenida, bloqueado: r.bloqueado, stock2: r.stock2, stock7: r.stock7
+    }));
+
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion, nvSaldoCero, lineasParaProductivas, lineasParaFabricacionPosible };
 }
 
 /* ============================================================
@@ -3085,6 +3095,32 @@ function construirLineasProductivas(){
     });
   });
 
+  // 2b) "Posible fabricación de stock": para códigos SIN NV programadas por fecha, cruzamos igual pero
+  // usando TODAS las NV con saldo (Retira/Despachar), incluidas retenidas y bloqueadas, ordenadas por
+  // fecha de emisión (más antigua primero) — lo que no cubre el stock B2+B7 es lo que "posiblemente" se está fabricando.
+  const lineasFabPorCodigo = {};
+  (RESULT.lineasParaFabricacionPosible||[]).forEach(r => {
+    if(r.saldo <= 0) return;
+    if(r.retira !== 'Si' && r.despachar !== 'Si') return;
+    if(!lineasFabPorCodigo[r.codigo]) lineasFabPorCodigo[r.codigo] = [];
+    lineasFabPorCodigo[r.codigo].push(r);
+  });
+  const detalleFabPosible = [];
+  Object.keys(lineasFabPorCodigo).forEach(codigo => {
+    const arr = lineasFabPorCodigo[codigo].slice().sort((a,b)=>{
+      const fa = a.fechaEmis ? a.fechaEmis.getTime() : Infinity;
+      const fb = b.fechaEmis ? b.fechaEmis.getTime() : Infinity;
+      return fa - fb;
+    });
+    let stockDisp = (arr[0].stock2||0) + (arr[0].stock7||0);
+    arr.forEach(r => {
+      const cubierto = Math.min(stockDisp, r.saldo);
+      stockDisp -= cubierto;
+      const posibleFabricacion = cubierto < r.saldo;
+      detalleFabPosible.push({...r, cubiertoPorStock: cubierto, posibleFabricacion});
+    });
+  });
+
   // 3) Cruce con Producción: por cada lote de RESULT_PROD, ver si su código tiene líneas críticas
   const porMaquina = {};
   RESULT_PROD.lotes.forEach(lote => {
@@ -3113,13 +3149,25 @@ function construirLineasProductivas(){
       };
     });
     const criticos = codigosDelDetalle.filter(c=>c.esCritico);
+
+    // Posible fabricación de stock (solo relevante cuando la máquina no tiene códigos críticos)
+    const codigosFabPosible = Object.values(m.codigos).map(c => {
+      const lineasFab = detalleFabPosible.filter(l => l.codigo === c.codigo && l.posibleFabricacion);
+      return {
+        codigo: c.codigo, descripcion: c.descripcion, um: c.um, cantidadFabricar: c.cantidadFabricar,
+        lineasFabricacionPosible: lineasFab,
+        tieneFabricacionPosible: lineasFab.length > 0
+      };
+    }).filter(c => c.tieneFabricacionPosible);
+
     return {
       maquina: m.maquina,
       totalCodigos: codigosDelDetalle.length,
       codigosCriticos: criticos.length,
       valorRiesgoTotal: criticos.reduce((s,c)=>s+c.valorRiesgo,0),
       valorTotalRiesgoTotal: criticos.reduce((s,c)=>s+c.valorTotalRiesgo,0),
-      codigos: codigosDelDetalle.sort((a,b)=>(a.nivel??99)-(b.nivel??99))
+      codigos: codigosDelDetalle.sort((a,b)=>(a.nivel??99)-(b.nivel??99)),
+      codigosFabPosible
     };
   }).sort((a,b)=>b.codigosCriticos-a.codigosCriticos);
 
@@ -3150,11 +3198,20 @@ function renderLineasProductivas(){
         <td>${m.codigosCriticos>0?`<strong style="color:var(--red);">${m.codigosCriticos}</strong>`:'0'}</td>
         <td>${money(m.valorRiesgoTotal)}</td>
         <td>${money(m.valorTotalRiesgoTotal)}</td>
-        <td><button class="btn btn-ghost btn-ver-lp" data-maquina="${esc(m.maquina)}" style="padding:4px 12px;">Ver detalle</button></td>
+        <td>
+          ${m.codigosCriticos>0
+            ? `<button class="btn btn-ghost btn-ver-lp" data-maquina="${esc(m.maquina)}" style="padding:4px 12px;">Ver detalle NV Prog.</button>`
+            : (m.codigosFabPosible && m.codigosFabPosible.length
+               ? `<button class="btn btn-ghost btn-ver-fab" data-maquina="${esc(m.maquina)}" style="padding:4px 12px;">Ver detalle</button>`
+               : '')}
+        </td>
       </tr>`).join('')}
     </tbody>`;
   document.querySelectorAll('.btn-ver-lp').forEach(btn => btn.addEventListener('click', () => {
     abrirDetalleLp(btn.getAttribute('data-maquina'));
+  }));
+  document.querySelectorAll('.btn-ver-fab').forEach(btn => btn.addEventListener('click', () => {
+    abrirDetalleFabPosible(btn.getAttribute('data-maquina'));
   }));
 }
 
@@ -3189,6 +3246,38 @@ function abrirDetalleLp(maquina){
           <td>${c.esCritico ? esc(NIVEL_LABELS[c.nivel]) : (c.lineasProgramadas.length?'Sin nivel (informativo)':'-')}</td>
           <td style="font-size:11.5px;">${fmtLineas(despacho)}</td>
           <td style="font-size:11.5px;">${fmtLineas(retira)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>`;
+  document.getElementById('modalLpDetalle').classList.remove('hidden');
+}
+
+function abrirDetalleFabPosible(maquina){
+  const m = LINEAS_PRODUCTIVAS.porMaquina.find(x=>x.maquina===maquina);
+  if(!m) return;
+  const valorTotal = m.codigosFabPosible.reduce((s,c)=>s+c.lineasFabricacionPosible.reduce((s2,l)=>s2+(l.saldo-l.cubiertoPorStock)*(l.saldoValor/(l.saldo||1)),0),0);
+  document.getElementById('modalLpTitulo').textContent = `Máquina ${maquina} — Posible fabricación de stock (sin NV programadas por fecha) · ${money(valorTotal)}`;
+  document.getElementById('lpDetalleTable').innerHTML = `
+    <thead><tr>
+      <th>Código</th><th>Descripción</th><th>UM</th><th>Cant. a Fabricar</th>
+      <th>NV a las que posiblemente se les fabrica</th>
+    </tr></thead>
+    <tbody>
+      ${m.codigosFabPosible.map(c => {
+        const filas = c.lineasFabricacionPosible.map(l => {
+          const tipo = l.despachar==='Si' ? 'Por Despachar' : 'Retira Cliente';
+          const alertas = [l.retenida==='Si'?'<span class="tag tag-retenida">RETENIDA</span>':'', l.bloqueado==='S'?'<span class="badge badge-bloq">BLOQUEADA</span>':''].filter(Boolean).join(' ');
+          return `NV ${l.nv} — ${esc(l.cliente)} — ${tipo} ${alertas} (Falta cubrir: ${num(l.saldo-l.cubiertoPorStock)} de ${num(l.saldo)}, ${money(l.saldoValor)}) — Emitida ${fmtFecha(l.fechaEmis)}`;
+        }).join('<br>');
+        const totalCubrir = c.lineasFabricacionPosible.reduce((s,l)=>s+(l.saldo-l.cubiertoPorStock),0);
+        const excedente = c.cantidadFabricar - totalCubrir;
+        const notaExcedente = excedente > 0
+          ? `<div style="color:var(--steel); font-size:11px; margin-top:4px;">Fabrica ${num(c.cantidadFabricar)}, de las cuales ${num(totalCubrir)} cubrirían lo pendiente — el resto (${num(excedente)}) podría ser stock adelantado.</div>`
+          : (excedente < 0 ? `<div style="color:var(--red); font-size:11px; margin-top:4px;">⚠️ Fabrica menos (${num(c.cantidadFabricar)}) de lo que falta cubrir (${num(totalCubrir)}) — revisar programación.</div>` : '');
+        return `<tr>
+          <td>${esc(c.codigo)}</td><td>${esc(c.descripcion)}</td><td>${esc(c.um)}</td>
+          <td>${num(c.cantidadFabricar)}</td>
+          <td style="font-size:11.5px;">${filas}${notaExcedente}</td>
         </tr>`;
       }).join('')}
     </tbody>`;
