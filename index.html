@@ -372,6 +372,27 @@
       </div>
     </div>
 
+    <div class="panel" id="panelPieEstadoProduccion">
+      <div class="panel-head"><h2>🏭 Líneas Productivas — Estado de la Producción</h2></div>
+      <div class="panel-body pad">
+        <div style="display:flex; flex-wrap:wrap; gap:24px; justify-content:center; align-items:flex-start;">
+          <div style="flex:1; min-width:280px; max-width:420px;">
+            <div style="text-align:center; font-weight:700; font-size:13px; color:var(--navy-deep); margin-bottom:8px;">Estado de la Producción (por valor $)</div>
+            <svg id="pieEstadoProduccion" viewBox="0 0 260 260" style="width:100%; max-width:260px; display:block; margin:0 auto;"></svg>
+            <div id="pieEstadoProduccionLegend" style="font-size:11.5px; margin-top:10px;"></div>
+            <div id="pieEstadoProduccionNota" style="font-size:11px; color:var(--steel); margin-top:8px; text-align:center;"></div>
+          </div>
+          <div style="flex:1; min-width:280px; max-width:420px;">
+            <div style="text-align:center; font-weight:700; font-size:13px; color:var(--navy-deep); margin-bottom:8px;">Top 5 Máquinas — Valor en Riesgo</div>
+            <div class="tablewrap">
+              <table id="top5MaquinasTable"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="assumption-note">Calculado sobre el cruce Programa de Producción vs NV Programadas (pestaña "Líneas Productivas"). Necesita tener ambos archivos cargados.</div>
+    </div>
+
     <div class="panel" id="panelResumenA">
       <div class="panel-head"><h2>Resumen Situación Notas de Venta — Aprobadas (A)</h2></div>
       <div class="panel-body pad">
@@ -2103,6 +2124,7 @@ function render(){
   renderAvisoSaldoCero();
   renderDashCards();
   renderGraficosDashboard();
+  renderPieEstadoProduccion();
   renderResumenSituacion();
   renderResumenRetail();
   renderLineasProductivas();
@@ -2316,6 +2338,54 @@ function exportarMotivoExcel(resumen, motivo, estadoLabel){
   })));
   XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(motivo));
   XLSX.writeFile(wb, `NV_${motivo.replace(/[^a-zA-Z0-9]/g,'_')}_${estadoLabel}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function renderPieEstadoProduccion(){
+  const panel = document.getElementById('panelPieEstadoProduccion');
+  if(!tienePermiso('verLineasProductivas')){ panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+
+  if(!RESULT_PROD || !RESULT){
+    document.getElementById('pieEstadoProduccion').innerHTML = `<text x="130" y="130" text-anchor="middle" font-size="12" fill="#4a6f8a" font-family="Segoe UI, Arial">Falta cargar Producción y/o NV</text>`;
+    document.getElementById('pieEstadoProduccionLegend').innerHTML = '';
+    document.getElementById('pieEstadoProduccionNota').textContent = '';
+    document.getElementById('top5MaquinasTable').innerHTML = `<tbody><tr><td class="empty">Sin datos.</td></tr></tbody>`;
+    return;
+  }
+  const lp = LINEAS_PRODUCTIVAS || construirLineasProductivas();
+  if(!lp){ return; }
+
+  const e = lp.estadoProduccion;
+  renderPieChart('pieEstadoProduccion', 'pieEstadoProduccionLegend', [
+    {label:'🔴 Crítico (depende de la máquina)', valor: e.valorCritico, color:'#b3352b'},
+    {label:'🟢 NV cubiertas por stock B2 y B7', valor: e.valorCubiertoStock, color:'#1e8e5a'},
+    {label:'📦 Posible fabricación para NV (sin fecha)', valor: e.valorPosibleFabricacion, color:'#a9720a'},
+  ]);
+  document.getElementById('pieEstadoProduccionNota').textContent = e.unidadesSinNV > 0
+    ? `+ ${num(e.unidadesSinNV)} unidades fabricadas sin ninguna NV asociada (reposición pura de stock, sin valor $ de deuda) — no incluidas en el gráfico.`
+    : '';
+
+  const rows = lp.top5Maquinas;
+  if(!rows.length){
+    document.getElementById('top5MaquinasTable').innerHTML = `<tbody><tr><td class="empty">No hay máquinas con valor en riesgo.</td></tr></tbody>`;
+  } else {
+    document.getElementById('top5MaquinasTable').innerHTML = `
+      <thead><tr><th>Máquina</th><th>Códigos críticos</th><th>Valor en riesgo</th></tr></thead>
+      <tbody>
+        ${rows.map(m=>`<tr>
+          <td><a href="#" class="link-top5-maquina" data-maquina="${esc(m.maquina)}" style="color:var(--navy-deep); font-weight:700; text-decoration:underline; cursor:pointer;">${esc(m.maquina)}</a></td>
+          <td>${m.codigosCriticos}</td><td>${money(m.valorRiesgoTotal)}</td>
+        </tr>`).join('')}
+      </tbody>`;
+    document.querySelectorAll('.link-top5-maquina').forEach(a => a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      tabActivo = 'tabLineasProductivas';
+      aplicarTabActivo();
+      LINEAS_PRODUCTIVAS = construirLineasProductivas();
+      renderLineasProductivas();
+      abrirDetalleLp(a.getAttribute('data-maquina'));
+    }));
+  }
 }
 
 function renderGraficosDashboard(){
@@ -3175,7 +3245,28 @@ function construirLineasProductivas(){
     };
   }).sort((a,b)=>b.codigosCriticos-a.codigosCriticos);
 
-  return {porMaquina: resumenMaquinas};
+  /* -------- Agregados globales para el gráfico "Estado de la Producción" (Dashboard General) -------- */
+  let valorCritico = 0, valorCubiertoStock = 0, valorPosibleFabricacion = 0, unidadesSinNV = 0;
+  resumenMaquinas.forEach(m => {
+    m.codigos.forEach(c => {
+      if(c.esCritico){
+        valorCritico += c.valorRiesgo;
+        valorCubiertoStock += (c.valorTotalRiesgo - c.valorRiesgo);
+      } else if(c.tieneFabricacionPosible){
+        valorPosibleFabricacion += c.lineasFabricacionPosible.reduce((s,l)=>s + (l.saldo-l.cubiertoPorStock) * (l.saldoValor/(l.saldo||1)), 0);
+        valorCubiertoStock += c.lineasFabricacionPosible.reduce((s,l)=>s + l.cubiertoPorStock * (l.saldoValor/(l.saldo||1)), 0);
+      } else if(c.stockCubreDeuda){
+        valorCubiertoStock += c.lineasFabTodas.reduce((s,l)=>s+l.saldoValor,0);
+      } else {
+        unidadesSinNV += c.cantidadFabricar;
+      }
+    });
+  });
+  const estadoProduccion = {valorCritico, valorCubiertoStock, valorPosibleFabricacion, unidadesSinNV};
+
+  const top5Maquinas = resumenMaquinas.filter(m=>m.valorRiesgoTotal>0).slice().sort((a,b)=>b.valorRiesgoTotal-a.valorRiesgoTotal).slice(0,5);
+
+  return {porMaquina: resumenMaquinas, estadoProduccion, top5Maquinas};
 }
 
 const NIVEL_LABELS = {0:'🔴 Nivel 0 (urgente)', 1:'🟠 Nivel 1', 2:'🟡 Nivel 2', 3:'🔵 Nivel 3', null:'—'};
@@ -3522,6 +3613,7 @@ function renderProduccion(){
   document.getElementById('prodUploadWrap').classList.toggle('hidden', !tienePermiso('cargarExcelProduccion'));
   document.getElementById('esperandoProduccion').classList.toggle('hidden', !!RESULT_PROD || tienePermiso('cargarExcelProduccion'));
   renderLineasProductivas();
+  if(RESULT) renderPieEstadoProduccion();
   if(!RESULT_PROD) return;
   document.getElementById('prodPanel').classList.remove('hidden');
   renderProdCards();
