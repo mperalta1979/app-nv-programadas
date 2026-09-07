@@ -560,7 +560,10 @@
     <div id="prodDiffPanel" class="panel warn-panel hidden">
       <div class="panel-head">
         <h2>⚠️ Diferencias respecto a la versión anterior</h2>
-        <button class="btn btn-ghost" id="btnCerrarDiff" style="padding:5px 12px;">Cerrar</button>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-export" id="btnExportProdDiff">⬇ Exportar Excel</button>
+          <button class="btn btn-ghost" id="btnColapsarDiff" style="padding:5px 12px;">Colapsar</button>
+        </div>
       </div>
       <div class="panel-body pad" id="prodDiffBody"></div>
     </div>
@@ -844,6 +847,7 @@ const PROD_DATOS_KEY = 'nvprog_produccion_v2';
 let RESULT_PROD = null;
 let RESULT_PROD_ANTERIOR = null;
 let PROD_DIFF = null;
+let prodDiffColapsado = false;
 let PROD_AOA_ACTUAL_RAW = null;
 let firebaseUnsubProd = null;
 
@@ -2873,7 +2877,7 @@ function tabsDisponibles(){
 
 function renderTabsNav(){
   const puedeExportar = tienePermiso('exportarExcel');
-  ['btnExportRetenidas','pdExportBtn','prodExportBtn','btnExportRetiroNoEf','btnExportDespachoNoEf','btnExportLpMaquinas'].forEach(id => {
+  ['btnExportRetenidas','pdExportBtn','prodExportBtn','btnExportRetiroNoEf','btnExportDespachoNoEf','btnExportLpMaquinas','btnExportProdDiff'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', !puedeExportar);
   });
@@ -3622,6 +3626,35 @@ function renderProduccion(){
   renderProdDiff();
 }
 
+/* Reutiliza la misma lógica de stock B2+B7 que "Líneas Productivas" para saber qué NV dependen de un código */
+function nvAfectadasPorCodigo(codigo){
+  if(!RESULT || !RESULT.lineasParaFabricacionPosible) return null; // null = no se puede calcular (falta Excel de NV)
+  const lineas = RESULT.lineasParaFabricacionPosible.filter(l => l.codigo === codigo && l.saldo > 0 && (l.retira==='Si' || l.despachar==='Si'));
+  if(!lineas.length) return [];
+  const arr = lineas.slice().sort((a,b)=>{
+    const fa = a.fechaEmis ? a.fechaEmis.getTime() : Infinity;
+    const fb = b.fechaEmis ? b.fechaEmis.getTime() : Infinity;
+    return fa - fb;
+  });
+  let stockDisp = (arr[0].stock2||0) + (arr[0].stock7||0);
+  const afectadas = [];
+  arr.forEach(r => {
+    const cubierto = Math.min(stockDisp, r.saldo);
+    stockDisp -= cubierto;
+    if(cubierto < r.saldo) afectadas.push({...r, faltante: r.saldo - cubierto});
+  });
+  return afectadas;
+}
+function fmtNvAfectadas(codigo){
+  const afectadas = nvAfectadasPorCodigo(codigo);
+  if(afectadas === null) return '<span style="color:var(--steel);">Carga el Excel de NV para calcular</span>';
+  if(!afectadas.length) return '<span style="color:var(--steel);">Ninguna (cubierto por stock o sin NV)</span>';
+  return afectadas.map(l => {
+    const tipo = l.despachar==='Si' ? 'Por Despachar' : 'Retira Cliente';
+    return `NV ${l.nv} — ${esc(l.cliente)} — ${tipo} (falta ${num(l.faltante)}, ${money(l.faltante*(l.saldoValor/(l.saldo||1)))})`;
+  }).join('<br>');
+}
+
 function renderProdDiff(){
   const panel = document.getElementById('prodDiffPanel');
   if(!sesion || !tienePermiso('accesoMaestro') || !PROD_DIFF || (!PROD_DIFF.nuevos.length && !PROD_DIFF.eliminados.length && !PROD_DIFF.modificados.length)){
@@ -3629,6 +3662,10 @@ function renderProdDiff(){
     return;
   }
   panel.classList.remove('hidden');
+  const btnColapsar = document.getElementById('btnColapsarDiff');
+  if(btnColapsar) btnColapsar.textContent = prodDiffColapsado ? 'Expandir' : 'Colapsar';
+  document.getElementById('prodDiffBody').classList.toggle('hidden', prodDiffColapsado);
+  if(prodDiffColapsado) return;
   const {nuevos, eliminados, modificados} = PROD_DIFF;
   let html = `<div style="display:flex; gap:16px; margin-bottom:14px; font-size:13px; font-weight:700;">
     <span style="color:var(--green);">🟢 ${nuevos.length} lote(s) nuevo(s)</span>
@@ -3645,22 +3682,62 @@ function renderProdDiff(){
       </tr>`).join('')}</tbody></table></div>`;
   }
   if(eliminados.length){
-    html += `<div style="font-weight:700; margin-bottom:6px;">Eliminados:</div><div class="tablewrap" style="max-height:220px; margin-bottom:16px;"><table>
-      <thead><tr><th>Código</th><th>Descripción</th><th>Lote</th><th>Máquina</th><th>Inicio</th><th>Término</th></tr></thead>
+    html += `<div style="font-weight:700; margin-bottom:6px;">Eliminados:</div><div class="tablewrap" style="max-height:280px; margin-bottom:16px;"><table>
+      <thead><tr><th>Código</th><th>Descripción</th><th>Lote</th><th>Máquina</th><th>Inicio</th><th>Término</th><th>NV Afectadas</th></tr></thead>
       <tbody>${eliminados.map(l=>`<tr>
         <td>${esc(l.codigo)}</td><td>${esc(l.descripcion)}</td><td>${l.lote}</td>
         <td>${esc(l.maquina)}</td><td>${fmtFecha(l.inicio)}</td><td>${fmtFecha(l.termino)}</td>
+        <td style="font-size:11px;">${fmtNvAfectadas(l.codigo)}</td>
       </tr>`).join('')}</tbody></table></div>`;
   }
   if(modificados.length){
-    html += `<div style="font-weight:700; margin-bottom:6px;">Modificados:</div><div class="tablewrap" style="max-height:280px;"><table>
-      <thead><tr><th>Código</th><th>Descripción</th><th>Lote</th><th>Campo</th><th>Antes</th><th>Después</th></tr></thead>
+    html += `<div style="font-weight:700; margin-bottom:6px;">Modificados:</div><div class="tablewrap" style="max-height:320px;"><table>
+      <thead><tr><th>Código</th><th>Descripción</th><th>Lote</th><th>Campo</th><th>Antes</th><th>Después</th><th>NV Afectadas</th></tr></thead>
       <tbody>${modificados.map(m=>m.cambios.map((c,i)=>`<tr>
         ${i===0?`<td rowspan="${m.cambios.length}">${esc(m.codigo)}</td><td rowspan="${m.cambios.length}">${esc(m.descripcion)}</td><td rowspan="${m.cambios.length}">${m.lote}</td>`:''}
         <td>${esc(c.campo)}</td><td>${esc(c.antes)}</td><td style="font-weight:700; color:var(--yellow);">${esc(c.despues)}</td>
+        ${i===0?`<td rowspan="${m.cambios.length}" style="font-size:11px;">${fmtNvAfectadas(m.codigo)}</td>`:''}
       </tr>`).join('')).join('')}</tbody></table></div>`;
   }
   document.getElementById('prodDiffBody').innerHTML = html;
+}
+
+function exportarProdDiffExcel(){
+  if(!PROD_DIFF) return;
+  const {nuevos, eliminados, modificados} = PROD_DIFF;
+  const wb = XLSX.utils.book_new();
+
+  const wsNuevos = XLSX.utils.json_to_sheet(nuevos.map(l=>({
+    'Código':l.codigo, 'Descripción':l.descripcion, 'Lote':l.lote, 'Máquina':l.maquina,
+    'Inicio':fmtFecha(l.inicio), 'Término':fmtFecha(l.termino)
+  })));
+  XLSX.utils.book_append_sheet(wb, wsNuevos, sanitizarNombreHoja('Nuevos'));
+
+  const wsEliminados = XLSX.utils.json_to_sheet(eliminados.map(l=>{
+    const afectadas = nvAfectadasPorCodigo(l.codigo);
+    return {
+      'Código':l.codigo, 'Descripción':l.descripcion, 'Lote':l.lote, 'Máquina':l.maquina,
+      'Inicio':fmtFecha(l.inicio), 'Término':fmtFecha(l.termino),
+      'NV Afectadas': afectadas===null ? 'Carga el Excel de NV' : (afectadas.length ? afectadas.map(a=>`NV ${a.nv} (${a.cliente}, falta ${num(a.faltante)})`).join(' / ') : 'Ninguna')
+    };
+  }));
+  XLSX.utils.book_append_sheet(wb, wsEliminados, sanitizarNombreHoja('Eliminados'));
+
+  const filasModificados = [];
+  modificados.forEach(m => {
+    const afectadas = nvAfectadasPorCodigo(m.codigo);
+    const nvTxt = afectadas===null ? 'Carga el Excel de NV' : (afectadas.length ? afectadas.map(a=>`NV ${a.nv} (${a.cliente}, falta ${num(a.faltante)})`).join(' / ') : 'Ninguna');
+    m.cambios.forEach(c => {
+      filasModificados.push({
+        'Código':m.codigo, 'Descripción':m.descripcion, 'Lote':m.lote,
+        'Campo':c.campo, 'Antes':c.antes, 'Después':c.despues, 'NV Afectadas': nvTxt
+      });
+    });
+  });
+  const wsModificados = XLSX.utils.json_to_sheet(filasModificados);
+  XLSX.utils.book_append_sheet(wb, wsModificados, sanitizarNombreHoja('Modificados'));
+
+  XLSX.writeFile(wb, `Diferencias_Produccion_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function renderProdCards(){
@@ -4144,9 +4221,11 @@ document.getElementById('prodLimpiarFechas').addEventListener('click', () => {
   document.getElementById('prodFechaHasta').value = '';
   renderProdTable();
 });
-document.getElementById('btnCerrarDiff').addEventListener('click', () => {
-  document.getElementById('prodDiffPanel').classList.add('hidden');
+document.getElementById('btnColapsarDiff').addEventListener('click', () => {
+  prodDiffColapsado = !prodDiffColapsado;
+  renderProdDiff();
 });
+document.getElementById('btnExportProdDiff').addEventListener('click', exportarProdDiffExcel);
 document.getElementById('btnVerDesgloseDiferenciaA').addEventListener('click', () => {
   abrirModalDiferencia('Aprobadas (A)', RESULT.resumenSituacionA);
 });
