@@ -2364,10 +2364,28 @@ function renderPieEstadoProduccion(){
     {label:'🔴 Crítico (depende de la máquina)', valor: e.valorCritico, color:'#b3352b'},
     {label:'🟢 NV cubiertas por stock B2 y B7', valor: e.valorCubiertoStock, color:'#1e8e5a'},
     {label:'📦 Posible fabricación para NV (sin fecha)', valor: e.valorPosibleFabricacion, color:'#a9720a'},
-  ]);
-  document.getElementById('pieEstadoProduccionNota').textContent = e.unidadesSinNV > 0
-    ? `+ ${num(e.unidadesSinNV)} unidades fabricadas sin ninguna NV asociada (reposición pura de stock, sin valor $ de deuda) — no incluidas en el gráfico.`
+  ], {
+    descargables: tienePermiso('exportarExcel'),
+    onDescargar: (label) => {
+      const mapa = {
+        '🔴 Crítico (depende de la máquina)': {detalle: e.detalleCritico, nombre: 'Critico'},
+        '🟢 NV cubiertas por stock B2 y B7': {detalle: e.detalleCubiertoStock, nombre: 'Cubiertas_Stock_B2_B7'},
+        '📦 Posible fabricación para NV (sin fecha)': {detalle: e.detallePosibleFabricacion, nombre: 'Posible_Fabricacion'},
+      };
+      const cfg = mapa[label];
+      if(cfg) exportarDetalleEstadoProduccion(cfg.detalle, cfg.nombre);
+    }
+  });
+  document.getElementById('pieEstadoProduccionNota').innerHTML = e.unidadesSinNV > 0
+    ? `+ ${num(e.unidadesSinNV)} unidades fabricadas sin <a href="#" id="linkSinNvAsociada" style="text-decoration:underline; cursor:pointer;">ninguna NV asociada</a> (reposición pura de stock, sin valor $ de deuda) — no incluidas en el gráfico. <button type="button" class="btn btn-ghost" id="btnDescargarSinNV" style="padding:1px 8px; font-size:10.5px;" title="Descargar Excel">⬇</button>`
     : '';
+  const linkSinNV = document.getElementById('linkSinNvAsociada');
+  if(linkSinNV) linkSinNV.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    abrirDetalleSinNvAsociada(e.detalleSinNV);
+  });
+  const btnDescargarSinNV = document.getElementById('btnDescargarSinNV');
+  if(btnDescargarSinNV) btnDescargarSinNV.addEventListener('click', () => exportarDetalleEstadoProduccion(e.detalleSinNV, 'Sin_NV_Asociada'));
 
   const rows = lp.top5Maquinas;
   if(!rows.length){
@@ -3251,22 +3269,36 @@ function construirLineasProductivas(){
 
   /* -------- Agregados globales para el gráfico "Estado de la Producción" (Dashboard General) -------- */
   let valorCritico = 0, valorCubiertoStock = 0, valorPosibleFabricacion = 0, unidadesSinNV = 0;
+  const detalleCritico = [], detalleCubiertoStock = [], detallePosibleFabricacion = [], detalleSinNV = [];
   resumenMaquinas.forEach(m => {
     m.codigos.forEach(c => {
       if(c.esCritico){
         valorCritico += c.valorRiesgo;
         valorCubiertoStock += (c.valorTotalRiesgo - c.valorRiesgo);
+        detalleCritico.push({maquina:m.maquina, codigo:c.codigo, descripcion:c.descripcion, um:c.um, cantidadFabricar:c.cantidadFabricar, nivel:c.nivel, valor:c.valorRiesgo});
+        if(c.valorTotalRiesgo - c.valorRiesgo > 0){
+          detalleCubiertoStock.push({maquina:m.maquina, codigo:c.codigo, descripcion:c.descripcion, um:c.um, cantidadFabricar:c.cantidadFabricar, valor:c.valorTotalRiesgo-c.valorRiesgo, origen:'Crítico (parcial)'});
+        }
       } else if(c.tieneFabricacionPosible){
-        valorPosibleFabricacion += c.lineasFabricacionPosible.reduce((s,l)=>s + (l.saldo-l.cubiertoPorStock) * (l.saldoValor/(l.saldo||1)), 0);
-        valorCubiertoStock += c.lineasFabricacionPosible.reduce((s,l)=>s + l.cubiertoPorStock * (l.saldoValor/(l.saldo||1)), 0);
+        const valorNoCubierto = c.lineasFabricacionPosible.reduce((s,l)=>s + (l.saldo-l.cubiertoPorStock) * (l.saldoValor/(l.saldo||1)), 0);
+        const valorCubierto = c.lineasFabricacionPosible.reduce((s,l)=>s + l.cubiertoPorStock * (l.saldoValor/(l.saldo||1)), 0);
+        valorPosibleFabricacion += valorNoCubierto;
+        valorCubiertoStock += valorCubierto;
+        detallePosibleFabricacion.push({maquina:m.maquina, codigo:c.codigo, descripcion:c.descripcion, um:c.um, cantidadFabricar:c.cantidadFabricar, valor:valorNoCubierto});
+        if(valorCubierto > 0){
+          detalleCubiertoStock.push({maquina:m.maquina, codigo:c.codigo, descripcion:c.descripcion, um:c.um, cantidadFabricar:c.cantidadFabricar, valor:valorCubierto, origen:'Posible fabricación (parcial)'});
+        }
       } else if(c.stockCubreDeuda){
-        valorCubiertoStock += c.lineasFabTodas.reduce((s,l)=>s+l.saldoValor,0);
+        const valor = c.lineasFabTodas.reduce((s,l)=>s+l.saldoValor,0);
+        valorCubiertoStock += valor;
+        detalleCubiertoStock.push({maquina:m.maquina, codigo:c.codigo, descripcion:c.descripcion, um:c.um, cantidadFabricar:c.cantidadFabricar, valor, origen:'Stock cubre deuda (total)'});
       } else {
         unidadesSinNV += c.cantidadFabricar;
+        detalleSinNV.push({maquina:m.maquina, codigo:c.codigo, descripcion:c.descripcion, um:c.um, cantidadFabricar:c.cantidadFabricar});
       }
     });
   });
-  const estadoProduccion = {valorCritico, valorCubiertoStock, valorPosibleFabricacion, unidadesSinNV};
+  const estadoProduccion = {valorCritico, valorCubiertoStock, valorPosibleFabricacion, unidadesSinNV, detalleCritico, detalleCubiertoStock, detallePosibleFabricacion, detalleSinNV};
 
   const top5Maquinas = resumenMaquinas.filter(m=>m.valorRiesgoTotal>0).slice().sort((a,b)=>b.valorRiesgoTotal-a.valorRiesgoTotal).slice(0,5);
 
@@ -3387,6 +3419,32 @@ function abrirDetalleFabPosible(maquina){
       }).join('')}
     </tbody>`;
   document.getElementById('modalLpDetalle').classList.remove('hidden');
+}
+
+function abrirDetalleSinNvAsociada(detalle){
+  document.getElementById('modalLpTitulo').textContent = `Productos en fabricación sin ninguna NV asociada (reposición pura de stock) — ${detalle.length} código(s)`;
+  document.getElementById('lpDetalleTable').innerHTML = `
+    <thead><tr><th>Máquina</th><th>Código</th><th>Descripción</th><th>UM</th><th>Cantidad</th></tr></thead>
+    <tbody>
+      ${detalle.map(d=>`<tr>
+        <td>${esc(d.maquina)}</td><td>${esc(d.codigo)}</td><td>${esc(d.descripcion)}</td><td>${esc(d.um)}</td><td>${num(d.cantidadFabricar)}</td>
+      </tr>`).join('')}
+    </tbody>`;
+  document.getElementById('modalLpDetalle').classList.remove('hidden');
+}
+
+function exportarDetalleEstadoProduccion(detalle, nombreCategoria){
+  if(!detalle || !detalle.length){ alert('No hay datos para esta categoría.'); return; }
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(detalle.map(d => ({
+    'Máquina': d.maquina, 'Código': d.codigo, 'Descripción': d.descripcion, 'UM': d.um,
+    'Cantidad a Fabricar': d.cantidadFabricar,
+    ...(d.valor!==undefined ? {'Valor': d.valor} : {}),
+    ...(d.nivel!==undefined ? {'Nivel': NIVEL_LABELS[d.nivel]||''} : {}),
+    ...(d.origen!==undefined ? {'Origen': d.origen} : {}),
+  })));
+  XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(nombreCategoria));
+  XLSX.writeFile(wb, `Estado_Produccion_${nombreCategoria}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function abrirDetalleGeneralMaquina(maquina){
