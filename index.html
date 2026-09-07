@@ -3134,31 +3134,35 @@ function construirLineasProductivas(){
 
   const resumenMaquinas = Object.values(porMaquina).map(m => {
     const codigosDelDetalle = Object.values(m.codigos).map(c => {
-      const lineasDeEsteCodigo = detalleLineas.filter(l => l.codigo === c.codigo && l.necesitaProduccion);
-      const nivelMin = lineasDeEsteCodigo.length ? Math.min(...lineasDeEsteCodigo.map(l => l.nivel===null?99:l.nivel)) : null;
-      const esCritico = lineasDeEsteCodigo.length > 0;
-      const valorRiesgo = lineasDeEsteCodigo.reduce((s,l)=>s + (l.saldo - l.cubiertoPorStock) * (l.saldoValor / (l.saldo||1)), 0);
-      const valorTotalRiesgo = lineasDeEsteCodigo.reduce((s,l)=>s + l.saldoValor, 0);
+      const lineasCriticas = detalleLineas.filter(l => l.codigo === c.codigo && l.necesitaProduccion);
+      const nivelMin = lineasCriticas.length ? Math.min(...lineasCriticas.map(l => l.nivel===null?99:l.nivel)) : null;
+      const esCritico = lineasCriticas.length > 0;
+      const valorRiesgo = lineasCriticas.reduce((s,l)=>s + (l.saldo - l.cubiertoPorStock) * (l.saldoValor / (l.saldo||1)), 0);
+      const valorTotalRiesgo = lineasCriticas.reduce((s,l)=>s + l.saldoValor, 0);
+
+      // Posible fabricación de stock (independiente de si es crítico) + caso "stock cubre deuda"
+      const lineasFabTodas = detalleFabPosible.filter(l => l.codigo === c.codigo);
+      const lineasFabNecesitan = lineasFabTodas.filter(l => l.posibleFabricacion);
+      const tieneFabricacionPosible = lineasFabNecesitan.length > 0;
+      const stockCubreDeuda = !tieneFabricacionPosible && lineasFabTodas.length > 0;
+      const cantidadCubiertaStock = lineasFabTodas.reduce((s,l)=>s+l.cubiertoPorStock,0);
+
       return {
         ...c,
-        lineasProgramadas: lineasDeEsteCodigo,
+        lineasProgramadas: lineasCriticas,
         esCritico,
         nivel: esCritico ? (nivelMin===99?null:nivelMin) : null,
         valorRiesgo,
-        valorTotalRiesgo
+        valorTotalRiesgo,
+        lineasFabricacionPosible: lineasFabNecesitan,
+        tieneFabricacionPosible,
+        stockCubreDeuda,
+        cantidadCubiertaStock,
+        lineasFabTodas
       };
     });
     const criticos = codigosDelDetalle.filter(c=>c.esCritico);
-
-    // Posible fabricación de stock (solo relevante cuando la máquina no tiene códigos críticos)
-    const codigosFabPosible = Object.values(m.codigos).map(c => {
-      const lineasFab = detalleFabPosible.filter(l => l.codigo === c.codigo && l.posibleFabricacion);
-      return {
-        codigo: c.codigo, descripcion: c.descripcion, um: c.um, cantidadFabricar: c.cantidadFabricar,
-        lineasFabricacionPosible: lineasFab,
-        tieneFabricacionPosible: lineasFab.length > 0
-      };
-    }).filter(c => c.tieneFabricacionPosible);
+    const codigosFabPosible = codigosDelDetalle.filter(c=>c.tieneFabricacionPosible);
 
     return {
       maquina: m.maquina,
@@ -3193,7 +3197,7 @@ function renderLineasProductivas(){
     <thead><tr><th>Máquina</th><th>Códigos totales</th><th>Códigos críticos</th><th>Valor en riesgo</th><th>Valor total en riesgo</th><th></th></tr></thead>
     <tbody>
       ${rows.map(m=>`<tr ${m.codigosCriticos>0?'style="background:#fff4e9;"':''}>
-        <td><strong>${esc(m.maquina)}</strong></td>
+        <td><a href="#" class="btn-ver-general" data-maquina="${esc(m.maquina)}" style="font-weight:700; color:var(--navy-deep); text-decoration:underline; cursor:pointer;">${esc(m.maquina)}</a></td>
         <td>${m.totalCodigos}</td>
         <td>${m.codigosCriticos>0?`<strong style="color:var(--red);">${m.codigosCriticos}</strong>`:'0'}</td>
         <td>${money(m.valorRiesgoTotal)}</td>
@@ -3203,7 +3207,9 @@ function renderLineasProductivas(){
             ? `<button class="btn btn-ghost btn-ver-lp" data-maquina="${esc(m.maquina)}" style="padding:4px 12px;">Ver detalle NV Prog.</button>`
             : (m.codigosFabPosible && m.codigosFabPosible.length
                ? `<button class="btn btn-ghost btn-ver-fab" data-maquina="${esc(m.maquina)}" style="padding:4px 12px;">Ver detalle</button>`
-               : '')}
+               : (m.codigos.some(c=>c.stockCubreDeuda)
+                  ? `<span style="color:var(--steel); font-size:11.5px;">📦 Stock cubre deuda (ver detalle en el nombre)</span>`
+                  : ''))}
         </td>
       </tr>`).join('')}
     </tbody>`;
@@ -3212,6 +3218,10 @@ function renderLineasProductivas(){
   }));
   document.querySelectorAll('.btn-ver-fab').forEach(btn => btn.addEventListener('click', () => {
     abrirDetalleFabPosible(btn.getAttribute('data-maquina'));
+  }));
+  document.querySelectorAll('.btn-ver-general').forEach(a => a.addEventListener('click', (e) => {
+    e.preventDefault();
+    abrirDetalleGeneralMaquina(a.getAttribute('data-maquina'));
   }));
 }
 
@@ -3278,6 +3288,38 @@ function abrirDetalleFabPosible(maquina){
           <td>${esc(c.codigo)}</td><td>${esc(c.descripcion)}</td><td>${esc(c.um)}</td>
           <td>${num(c.cantidadFabricar)}</td>
           <td style="font-size:11.5px;">${filas}${notaExcedente}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>`;
+  document.getElementById('modalLpDetalle').classList.remove('hidden');
+}
+
+function abrirDetalleGeneralMaquina(maquina){
+  const m = LINEAS_PRODUCTIVAS.porMaquina.find(x=>x.maquina===maquina);
+  if(!m) return;
+  document.getElementById('modalLpTitulo').textContent = `Máquina ${maquina} — Detalle general de producción (${m.totalCodigos} código(s))`;
+  document.getElementById('lpDetalleTable').innerHTML = `
+    <thead><tr>
+      <th>Código</th><th>Descripción</th><th>UM</th><th>Cant. a Fabricar</th><th>Lotes (fechas)</th><th>Estado</th>
+    </tr></thead>
+    <tbody>
+      ${m.codigos.map(c => {
+        const lotesTxt = (c.lotes||[]).map(l=>`Lote ${l.lote}: ${fmtFecha(l.inicio)} → ${fmtFecha(l.termino)} (${num(l.cantidadLote||0)})`).join('<br>');
+        let estado;
+        if(c.esCritico){
+          estado = `${esc(NIVEL_LABELS[c.nivel])} — depende de esta máquina (${money(c.valorRiesgo)} en riesgo)`;
+        } else if(c.tieneFabricacionPosible){
+          estado = `📦 Posible fabricación para NV (${c.lineasFabricacionPosible.length} NV, ver "Ver detalle")`;
+        } else if(c.stockCubreDeuda){
+          estado = `✅ Stock cubre deuda — fabricación de ${num(c.cantidadFabricar)} corresponde a stock (cubría ${num(c.cantidadCubiertaStock)} pendiente)`;
+        } else {
+          estado = `— Sin NV asociada (fabricación de ${num(c.cantidadFabricar)} es reposición de stock)`;
+        }
+        return `<tr style="background:${c.esCritico?NIVEL_COLORES[c.nivel]:(c.tieneFabricacionPosible?'#fdf3e3':'#fff')};">
+          <td>${esc(c.codigo)}</td><td>${esc(c.descripcion)}</td><td>${esc(c.um)}</td>
+          <td>${num(c.cantidadFabricar)}</td>
+          <td style="font-size:11px;">${lotesTxt}</td>
+          <td style="font-size:11.5px;">${estado}</td>
         </tr>`;
       }).join('')}
     </tbody>`;
