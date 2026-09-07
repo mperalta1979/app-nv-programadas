@@ -757,16 +757,26 @@ function guardarDatosEnNube(rows, filename){
   const trimmed = trimirFilas(rows);
   actualizarEstadoSync('cargando', 'Subiendo a la nube...');
   const docRef = firebaseDb.collection('nv_programadas').doc('actual');
+  const docRefAnterior = firebaseDb.collection('nv_programadas').doc('actual_anterior');
   return docRef.get().then(snap => {
     const previo = snap.exists ? snap.data() : null;
-    return docRef.set({
+    const rowsAnteriorPrevio = previo ? (previo.rowsActual || previo.rows || null) : null;
+    const filenameAnteriorPrevio = previo ? (previo.filenameActual || previo.filename || null) : null;
+    const savedAtAnteriorPrevio = previo ? (previo.savedAtActual || previo.savedAt || null) : null;
+
+    // Documento "actual": SOLO los datos nuevos (liviano, nunca se acerca al límite de 1MB por sí solo)
+    const escrituraActual = docRef.set({
       rowsActual: trimmed, filenameActual: filename, savedAtActual: new Date().toISOString(),
-      rowsAnterior: previo ? (previo.rowsActual || previo.rows || null) : null,
-      filenameAnterior: previo ? (previo.filenameActual || previo.filename || null) : null,
-      savedAtAnterior: previo ? (previo.savedAtActual || previo.savedAt || null) : null,
-      subidoPor: sesion ? sesion.username : 'desconocido',
-      claveAdmin: FIREBASE_ADMIN_KEY
+      subidoPor: sesion ? sesion.username : 'desconocido', claveAdmin: FIREBASE_ADMIN_KEY
     });
+    // Documento "actual_anterior": el histórico, SEPARADO — así nunca se suman los dos y no se supera el límite
+    const escrituraAnterior = rowsAnteriorPrevio
+      ? docRefAnterior.set({
+          rowsAnterior: rowsAnteriorPrevio, filenameAnterior: filenameAnteriorPrevio, savedAtAnterior: savedAtAnteriorPrevio,
+          claveAdmin: FIREBASE_ADMIN_KEY
+        })
+      : Promise.resolve();
+    return Promise.all([escrituraActual, escrituraAnterior]);
   }).then(() => {
     actualizarEstadoSync('ok', 'Sincronizado con la nube');
     return true;
@@ -813,33 +823,53 @@ function calcularDiffNV(rowsAnterior, rowsActual){
   return {nuevas, eliminadas, modificadas};
 }
 
+let firebaseUnsubAnterior = null;
+let ULTIMO_DOC_ACTUAL = null, ULTIMO_DOC_ANTERIOR = null;
+
+function aplicarDatosNVCombinados(){
+  if(!ULTIMO_DOC_ACTUAL) return;
+  const data = ULTIMO_DOC_ACTUAL;
+  const rowsActual = data.rowsActual || data.rows || null; // compatibilidad con doc viejo sin historial
+  if(!rowsActual || !rowsActual.length){ actualizarEstadoSync('local', 'Aún no hay datos cargados en la nube'); return; }
+  // El histórico puede venir del documento separado "actual_anterior", o (compatibilidad hacia atrás) del propio doc "actual"
+  const anteriorData = ULTIMO_DOC_ANTERIOR || {};
+  const rowsAnterior = anteriorData.rowsAnterior || data.rowsAnterior || null;
+  const filenameAnterior = anteriorData.filenameAnterior || data.filenameAnterior || null;
+  const savedAtAnterior = anteriorData.savedAtAnterior || data.savedAtAnterior || null;
+
+  // Cache local por si se pierde la conexión más adelante
+  try{ localStorage.setItem(DATOS_KEY, JSON.stringify({
+    rowsActual, filenameActual: data.filenameActual||data.filename, savedAtActual: data.savedAtActual||data.savedAt,
+    rowsAnterior, filenameAnterior, savedAtAnterior
+  })); }catch(e){}
+  NV_ROWS_ACTUAL_RAW = {rows: rowsActual, filename: data.filenameActual||data.filename, savedAt: data.savedAtActual||data.savedAt};
+  RESULT = procesarDatos(rowsActual);
+  RESULT_ANTERIOR = rowsAnterior ? procesarDatos(rowsAnterior) : null;
+  NV_DIFF = rowsAnterior ? calcularDiffNV(rowsAnterior, rowsActual) : null;
+  document.getElementById('filename').textContent = data.filenameActual || data.filename || '';
+  mostrarInfoDatosGuardados(data.filenameActual || data.filename || '(sin nombre)', data.savedAtActual || data.savedAt);
+  document.getElementById('esperandoDatosVendedor').classList.add('hidden');
+  actualizarEstadoSync('ok', `Sincronizado (${data.subidoPor||'admin'} · ${fmtFecha(new Date(data.savedAtActual||data.savedAt))})`);
+  if(sesion) render();
+}
+
 function suscribirseADatosNube(){
   if(!firebaseListo){ actualizarEstadoSync('local', 'Firebase no configurado — usando datos guardados en este navegador'); return; }
   actualizarEstadoSync('cargando', 'Conectando con la nube...');
   if(firebaseUnsub) firebaseUnsub();
+  if(firebaseUnsubAnterior) firebaseUnsubAnterior();
   firebaseUnsub = firebaseDb.collection('nv_programadas').doc('actual').onSnapshot(doc => {
     if(!doc.exists){ actualizarEstadoSync('local', 'Aún no hay datos cargados en la nube'); return; }
-    const data = doc.data();
-    const rowsActual = data.rowsActual || data.rows || null; // compatibilidad con doc viejo sin historial
-    if(!rowsActual || !rowsActual.length){ actualizarEstadoSync('local', 'Aún no hay datos cargados en la nube'); return; }
-    // Cache local por si se pierde la conexión más adelante
-    try{ localStorage.setItem(DATOS_KEY, JSON.stringify({
-      rowsActual, filenameActual: data.filenameActual||data.filename, savedAtActual: data.savedAtActual||data.savedAt,
-      rowsAnterior: data.rowsAnterior||null, filenameAnterior: data.filenameAnterior||null, savedAtAnterior: data.savedAtAnterior||null
-    })); }catch(e){}
-    NV_ROWS_ACTUAL_RAW = {rows: rowsActual, filename: data.filenameActual||data.filename, savedAt: data.savedAtActual||data.savedAt};
-    RESULT = procesarDatos(rowsActual);
-    RESULT_ANTERIOR = data.rowsAnterior ? procesarDatos(data.rowsAnterior) : null;
-    NV_DIFF = data.rowsAnterior ? calcularDiffNV(data.rowsAnterior, rowsActual) : null;
-    document.getElementById('filename').textContent = data.filenameActual || data.filename || '';
-    mostrarInfoDatosGuardados(data.filenameActual || data.filename || '(sin nombre)', data.savedAtActual || data.savedAt);
-    document.getElementById('esperandoDatosVendedor').classList.add('hidden');
-    actualizarEstadoSync('ok', `Sincronizado (${data.subidoPor||'admin'} · ${fmtFecha(new Date(data.savedAtActual||data.savedAt))})`);
-    if(sesion) render();
+    ULTIMO_DOC_ACTUAL = doc.data();
+    aplicarDatosNVCombinados();
   }, err => {
     console.warn('Error escuchando Firebase, usando datos locales:', err);
     actualizarEstadoSync('error', 'Sin conexión a la nube — usando datos locales guardados');
   });
+  firebaseUnsubAnterior = firebaseDb.collection('nv_programadas').doc('actual_anterior').onSnapshot(doc => {
+    ULTIMO_DOC_ANTERIOR = doc.exists ? doc.data() : null;
+    aplicarDatosNVCombinados();
+  }, err => console.warn('Error escuchando histórico de NV:', err));
 }
 
 /* -------- Sincronización del Programa de Producción: guarda ACTUAL + ANTERIOR -------- */
@@ -2825,6 +2855,8 @@ function logout(){
   RESULT = null;
   RESULT_PROD = null;
   if(firebaseUnsub){ firebaseUnsub(); firebaseUnsub = null; }
+  if(firebaseUnsubAnterior){ firebaseUnsubAnterior(); firebaseUnsubAnterior = null; }
+  ULTIMO_DOC_ACTUAL = null; ULTIMO_DOC_ANTERIOR = null;
   if(firebaseUnsubProd){ firebaseUnsubProd(); firebaseUnsubProd = null; }
   if(firebaseUnsubRetenciones){ firebaseUnsubRetenciones(); firebaseUnsubRetenciones = null; }
   if(firebaseUnsubSeguimiento){ firebaseUnsubSeguimiento(); firebaseUnsubSeguimiento = null; }
@@ -4111,6 +4143,7 @@ function borrarDatosGuardados(){
   localStorage.removeItem(DATOS_KEY);
   if(firebaseListo){
     firebaseDb.collection('nv_programadas').doc('actual').delete().catch(err=>console.warn('No se pudo borrar en la nube:', err));
+    firebaseDb.collection('nv_programadas').doc('actual_anterior').delete().catch(err=>console.warn('No se pudo borrar el histórico en la nube:', err));
   }
   RESULT = null; RESULT_ANTERIOR = null; NV_DIFF = null; NV_ROWS_ACTUAL_RAW = null;
   document.getElementById('filename').textContent = '';
