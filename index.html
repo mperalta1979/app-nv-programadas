@@ -2614,7 +2614,7 @@ function exportarRetailExcel(nvs, cliente, categoriaLabel, estado){
   });
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(ordenadas.map(n => ({
-    'NV': n.nv, 'Estado NV': n.nvEstado, 'Fecha Emisión': fmtFecha(n.fecha), 'Cliente': n.cliente, 'Monto Valorizado': n.valorSaldo
+    'NV': n.nv, 'Estado NV': n.nvEstado, 'Tipo': n.tipo, 'Fecha Emisión': fmtFecha(n.fecha), 'Cliente': n.cliente, 'Monto Valorizado': n.valorSaldo
   })));
   XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(categoriaLabel));
   XLSX.writeFile(wb, `NV_Retail_${cliente.replace(/[^a-zA-Z0-9]/g,'_')}_${categoriaLabel.replace(/[^a-zA-Z0-9]/g,'_')}_${estado}_${new Date().toISOString().slice(0,10)}.xlsx`);
