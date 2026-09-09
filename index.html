@@ -272,12 +272,6 @@
 
   <div id="syncStatusWrap"><span id="syncStatus" class="sync-badge sync-local">📴 Iniciando...</span></div>
 
-  <div id="uploadbox" class="uploadbox hidden">
-    <button class="uploadbtn" id="btnPick">Cargar archivo de NV (VISTA / NV_PARA_CARGAR_A_REVISION.xlsx)</button>
-    <input type="file" id="fileInput" accept=".xlsx,.xls">
-    <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
-    <div class="filename" id="filename"></div>
-  </div>
   <div id="esperandoDatosVendedor" class="hidden panel-body pad" style="background:#fff; border:1px solid var(--line); border-radius:10px; margin-bottom:16px; text-align:center; color:var(--steel); padding:20px;">
     Esperando a que el Administrador cargue los datos de NV. Se van a mostrar automáticamente aquí apenas estén disponibles.
   </div>
@@ -285,6 +279,27 @@
   <input type="file" id="importDatosInput" accept=".json" class="hidden">
 
   <div id="tabMaestro" class="hidden">
+    <div id="panelCargaArchivos" class="panel">
+      <div class="panel-head"><h2>📤 Carga de Archivos</h2></div>
+      <div class="panel-body pad">
+        <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin-bottom:6px;">Excel de NV</div>
+        <div id="uploadbox" class="uploadbox hidden">
+          <button class="uploadbtn" id="btnPick">Cargar archivo de NV (VISTA / NV_PARA_CARGAR_A_REVISION.xlsx)</button>
+          <input type="file" id="fileInput" accept=".xlsx,.xls">
+          <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
+          <div class="filename" id="filename"></div>
+        </div>
+
+        <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin:20px 0 6px;">Programa de Producción</div>
+        <div id="prodUploadWrap" class="uploadbox hidden">
+          <button class="uploadbtn" id="btnPickProd">Cargar Programa de Producción</button>
+          <input type="file" id="fileInputProd" accept=".xlsx,.xls">
+          <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
+          <div class="filename" id="filenameProd"></div>
+        </div>
+      </div>
+    </div>
+
     <div id="adminPanel" class="panel">
       <div class="panel-head">
         <h2>👤 Gestión de Usuarios</h2>
@@ -545,12 +560,6 @@
   <div id="tabProduccion" class="hidden">
     <div class="section-title">Programa de Producción</div>
 
-    <div id="prodUploadWrap" class="uploadbox hidden">
-      <button class="uploadbtn" id="btnPickProd">Cargar Programa de Producción (ENTXCOD.xlsx)</button>
-      <input type="file" id="fileInputProd" accept=".xlsx,.xls">
-      <div class="uploadhint">Al cargarlo, se sincroniza automáticamente para todos los usuarios (reemplaza al anterior).</div>
-      <div class="filename" id="filenameProd"></div>
-    </div>
     <div id="syncStatusWrapProd"><span id="syncStatusProd" class="sync-badge sync-local">📴 Iniciando...</span></div>
     <div id="prodDatosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px; margin-bottom:16px; color:var(--navy-deep);"></div>
     <div id="esperandoProduccion" class="hidden panel-body pad" style="background:#fff; border:1px solid var(--line); border-radius:10px; margin-bottom:16px; text-align:center; color:var(--steel); padding:20px;">
@@ -1549,15 +1558,29 @@ function excelSerialToDate(v){
   if(v===null || v===undefined || v==='' || isNaN(Number(v))) return null;
   const n = Number(v);
   if(n <= 1) return null; // 0 o 1 = sin fecha real (placeholder), nunca una fecha válida de negocio
-  const d = new Date(Date.UTC(1899,11,30) + n*86400000);
-  if(d.getUTCFullYear() <= 1900) return null; // resguardo extra por si el serial es basura
-  return d;
+  // El número de serie de Excel representa un día calendario "puro" (sin huso horario). Se calcula primero
+  // en UTC (fórmula estándar de Excel) para obtener año/mes/día correctos, y LUEGO se reconstruye en hora
+  // LOCAL con esos mismos componentes — así queda consistente con parseFechaDDMMYYYY (que ya usa hora local)
+  // y con fmtFecha (que lee con métodos locales). Si no se hace este ajuste, en husos horarios negativos
+  // (como Chile, UTC-3/-4) la fecha se muestra un día antes del real.
+  const baseUTC = new Date(Date.UTC(1899,11,30) + n*86400000);
+  if(baseUTC.getUTCFullYear() <= 1900) return null; // resguardo extra por si el serial es basura
+  return new Date(baseUTC.getUTCFullYear(), baseUTC.getUTCMonth(), baseUTC.getUTCDate());
 }
 function fmtFecha(d){
   if(!d) return '';
   const dd = String(d.getDate()).padStart(2,'0');
   const mm = String(d.getMonth()+1).padStart(2,'0');
   return `${dd}/${mm}/${d.getFullYear()}`;
+}
+/* Diferencia en DÍAS CALENDARIO exactos entre dos fechas. No se calcula solo con getTime()/86400000 porque
+   un día con cambio de horario de verano (como ocurre en Chile, generalmente en septiembre) puede tener 23
+   o 25 horas — eso desviaría el resultado en +/-1 día. Al normalizar ambas fechas a "medianoche UTC" con los
+   mismos componentes año/mes/día, la diferencia siempre da un múltiplo exacto de un día, sin ese problema. */
+function diasDeDiferencia(fechaReciente, fechaAntigua){
+  const utcReciente = Date.UTC(fechaReciente.getFullYear(), fechaReciente.getMonth(), fechaReciente.getDate());
+  const utcAntigua = Date.UTC(fechaAntigua.getFullYear(), fechaAntigua.getMonth(), fechaAntigua.getDate());
+  return Math.round((utcReciente - utcAntigua) / 86400000);
 }
 function money(n){
   if(n===null || n===undefined || isNaN(n)) return '-';
@@ -2105,7 +2128,7 @@ function procesarDatos(rows){
     return r.saldo > 0; // respaldo mientras no haya guías cargadas
   });
   function mapVencida(r, estadoTxt){
-    const diasAtraso = Math.floor((hoySinHora.getTime() - r.fprogFecha.getTime()) / 86400000);
+    const diasAtraso = diasDeDiferencia(hoySinHora, r.fprogFecha);
     return {
       nv:r.nv, nvEstado:r.nvEstado, codigo:r.codigo, producto:r.producto, cliente:r.cliente, vendedor:r.vendedor,
       comuna:r.comuna, ciudad:r.ciudad,
@@ -3670,7 +3693,7 @@ function renderNoEfectuados(){
   }
   renderRetiroNoEfTable();
 
-  document.getElementById('despachoNoEfTable').innerHTML = tablaNoEfectuadoHtml(ne.despacho, true);
+  document.getElementById('despachoNoEfTable').innerHTML = tablaNoEfectuadoHtml(ne.despacho);
 
   const semanal = [];
   ne.retiroSemanal.forEach(s => semanal.push({...s, tipo:'Retiro'}));
@@ -3684,17 +3707,16 @@ function renderNoEfectuados(){
 
 }
 
-function tablaNoEfectuadoHtml(rows, conComunaCiudad){
+function tablaNoEfectuadoHtml(rows){
   if(!rows.length) return `<tbody><tr><td class="empty">Sin NV pendientes en esta categoría.</td></tr></tbody>`;
   return `
-    <thead><tr><th>NV</th><th>Código</th><th>Producto</th><th>Cliente</th><th>Vendedor</th>${conComunaCiudad?'<th>Comuna</th><th>Ciudad</th>':''}<th>Fecha Programada</th><th>Días atraso</th><th>Saldo</th><th>Valor</th></tr></thead>
+    <thead><tr><th>NV</th><th>Cliente</th><th>Vendedor</th><th>Fecha Programada</th><th>Días atraso</th><th>Valor</th></tr></thead>
     <tbody>
       ${rows.map(r=>`<tr style="background:#fbe6e3;">
         <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span></td>
-        <td>${esc(r.codigo)}</td><td>${esc(r.producto)}</td><td>${esc(r.cliente)}</td><td>${esc(r.vendedor)}</td>
-        ${conComunaCiudad?`<td>${esc(r.comuna||'')}</td><td>${esc(r.ciudad||'')}</td>`:''}
+        <td>${esc(r.cliente)}</td><td>${esc(r.vendedor)}</td>
         <td>${fmtFecha(r.fechaProgramada)}</td><td><strong>${r.diasAtraso}d</strong></td>
-        <td>${num(r.saldo)}</td><td>${money(r.valor)}</td>
+        <td>${money(r.valor)}</td>
       </tr>`).join('')}
     </tbody>`;
 }
