@@ -282,33 +282,39 @@
     <div id="panelCargaArchivos" class="panel">
       <div class="panel-head"><h2>📤 Carga de Archivos</h2></div>
       <div class="panel-body pad">
-        <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin-bottom:6px;">Excel de NV</div>
-        <div id="uploadbox" class="uploadbox hidden">
-          <button class="uploadbtn" id="btnPick">Cargar archivo de NV (VISTA / NV_PARA_CARGAR_A_REVISION.xlsx)</button>
-          <input type="file" id="fileInput" accept=".xlsx,.xls">
-          <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
-          <div class="filename" id="filename"></div>
+        <div id="seccionCargaNV">
+          <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin-bottom:6px;">Excel de NV</div>
+          <div id="uploadbox" class="uploadbox hidden">
+            <button class="uploadbtn" id="btnPick">Cargar archivo de NV (VISTA / NV_PARA_CARGAR_A_REVISION.xlsx)</button>
+            <input type="file" id="fileInput" accept=".xlsx,.xls">
+            <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
+            <div class="filename" id="filename"></div>
+          </div>
+          <div id="ultimaCargaNV" style="font-size:11.5px; color:var(--steel); margin:6px 0 20px;"></div>
         </div>
-        <div id="ultimaCargaNV" style="font-size:11.5px; color:var(--steel); margin:6px 0 20px;"></div>
 
-        <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin-bottom:6px;">Programa de Producción</div>
-        <div id="prodUploadWrap" class="uploadbox hidden">
-          <button class="uploadbtn" id="btnPickProd">Cargar Programa de Producción</button>
-          <input type="file" id="fileInputProd" accept=".xlsx,.xls">
-          <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
-          <div class="filename" id="filenameProd"></div>
+        <div id="seccionCargaProd">
+          <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin-bottom:6px;">Programa de Producción</div>
+          <div id="prodUploadWrap" class="uploadbox hidden">
+            <button class="uploadbtn" id="btnPickProd">Cargar Programa de Producción</button>
+            <input type="file" id="fileInputProd" accept=".xlsx,.xls">
+            <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
+            <div class="filename" id="filenameProd"></div>
+          </div>
+          <div id="ultimaCargaProd" style="font-size:11.5px; color:var(--steel); margin:6px 0 20px;"></div>
         </div>
-        <div id="ultimaCargaProd" style="font-size:11.5px; color:var(--steel); margin:6px 0 20px;"></div>
 
-        <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin-bottom:6px;">Guías de Despacho (Query_Guias_de_Despacho.xlsx)</div>
-        <div id="guiasUploadWrap" class="uploadbox">
-          <button class="uploadbtn" id="btnPickGuias">Cargar Guías de Despacho</button>
-          <input type="file" id="fileInputGuias" accept=".xlsx,.xls">
-          <div class="uploadhint">Solo se guardan los últimos 15 días para no exceder el límite de la nube. Se usa para confirmar si una NV Retira Cliente / Por Despachar programada realmente salió.</div>
-          <div class="filename" id="filenameGuias"></div>
+        <div id="seccionCargaGuias">
+          <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin-bottom:6px;">Guías de Despacho (Query_Guias_de_Despacho.xlsx)</div>
+          <div id="guiasUploadWrap" class="uploadbox">
+            <button class="uploadbtn" id="btnPickGuias">Cargar Guías de Despacho</button>
+            <input type="file" id="fileInputGuias" accept=".xlsx,.xls">
+            <div class="uploadhint">Solo se guardan los últimos 15 días para no exceder el límite de la nube. Se usa para confirmar si una NV Retira Cliente / Por Despachar programada realmente salió.</div>
+            <div class="filename" id="filenameGuias"></div>
+          </div>
+          <div id="ultimaCargaGuias" style="font-size:11.5px; color:var(--steel); margin:6px 0;"></div>
+          <div id="guiasDatosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px; margin-top:8px;"></div>
         </div>
-        <div id="ultimaCargaGuias" style="font-size:11.5px; color:var(--steel); margin:6px 0;"></div>
-        <div id="guiasDatosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px; margin-top:8px;"></div>
       </div>
     </div>
 
@@ -1197,6 +1203,7 @@ const PERMISOS_DISPONIBLES = [
   {key:'verTodasNV', label:'Ver TODAS las NV en Despacho (no solo las propias)'},
   {key:'cargarExcelNV', label:'Cargar el Excel de NV'},
   {key:'cargarExcelProduccion', label:'Cargar el Excel de Producción'},
+  {key:'cargarGuias', label:'Cargar Guías de Despacho'},
   {key:'editarRetencion', label:'Editar motivo de retención'},
   {key:'exportarExcel', label:'Exportar a Excel'},
   {key:'accesoMaestro', label:'Acceso a Maestro'},
@@ -2210,6 +2217,25 @@ function aplicarPermisosPanelesAnalisis(){
   });
 }
 
+function aplicarPermisosMaestro(){
+  const mapa = {
+    seccionCargaNV: 'cargarExcelNV',
+    seccionCargaProd: 'cargarExcelProduccion',
+    seccionCargaGuias: 'cargarGuias',
+    adminPanel: 'accesoMaestro',
+    rolesPanel: 'accesoMaestro'
+  };
+  Object.keys(mapa).forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('hidden', !tienePermiso(mapa[id]));
+  });
+  const panelCarga = document.getElementById('panelCargaArchivos');
+  if(panelCarga){
+    const algunaCargaVisible = tienePermiso('cargarExcelNV') || tienePermiso('cargarExcelProduccion') || tienePermiso('cargarGuias');
+    panelCarga.classList.toggle('hidden', !algunaCargaVisible);
+  }
+}
+
 function render(){
   document.getElementById('app').classList.remove('hidden');
   renderAvisoSaldoCero();
@@ -2224,6 +2250,7 @@ function render(){
   renderTabs();
   renderRetenidas();
   aplicarPermisosPanelesAnalisis();
+  aplicarPermisosMaestro();
   if(sesion){
     renderTabsNav();
     renderProgramaDespacho();
@@ -2930,6 +2957,7 @@ function aplicarSesion(){
   document.getElementById('mainWrap').classList.remove('hidden');
   document.getElementById('sesionBar').classList.remove('hidden');
   document.getElementById('sesionLabel').textContent = `${sesion.username} · ${etiquetaRol(sesion.role)}`;
+  aplicarPermisosMaestro();
 
   document.getElementById('uploadbox').classList.toggle('hidden', !tienePermiso('cargarExcelNV'));
 
@@ -2978,7 +3006,8 @@ function tabsDisponibles(){
   if(tienePermiso('verProduccion')) tabs.push({id:'tabProduccion', label:'🏭 Programa de Producción'});
   if(tienePermiso('verNoEfectuados')) tabs.push({id:'tabNoEfectuados', label:'⛔ No Efectuados'});
   if(tienePermiso('verLineasProductivas')) tabs.push({id:'tabLineasProductivas', label:'🏗️ Líneas Productivas'});
-  if(tienePermiso('accesoMaestro')) tabs.push({id:'tabMaestro', label:'🔧 Maestro'});
+  const puedeVerMaestro = tienePermiso('accesoMaestro') || tienePermiso('cargarExcelNV') || tienePermiso('cargarExcelProduccion') || tienePermiso('cargarGuias');
+  if(puedeVerMaestro) tabs.push({id:'tabMaestro', label:'🔧 Maestro'});
   return tabs;
 }
 
