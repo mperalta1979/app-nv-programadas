@@ -2147,12 +2147,27 @@ function procesarDatos(rows){
     return {
       nv:r.nv, nvEstado:r.nvEstado, codigo:r.codigo, producto:r.producto, cliente:r.cliente, vendedor:r.vendedor,
       comuna:r.comuna, ciudad:r.ciudad,
-      fechaProgramada:r.fprogFecha, diasAtraso, saldo:r.saldo, valor:r.saldoValor,
+      fechaProgramada:r.fprogFecha, diasAtraso, saldo:r.qprog||0, valor:r.qprogValor||0,
       estado: estadoTxt, semana: semanaLabel(r.fprogFecha), metodo: usaGuias ? 'guia' : 'saldo'
     };
   }
-  const retiroNoEfectuado = vencidas.filter(r=>r.retira==='Si').map(r=>mapVencida(r,'Retiro no efectuado')).sort((a,b)=>b.diasAtraso-a.diasAtraso);
-  const despachoNoEfectuado = vencidas.filter(r=>r.despachar==='Si').map(r=>mapVencida(r,'Por despachar no efectuado')).sort((a,b)=>b.diasAtraso-a.diasAtraso);
+  /* Se agrupa por NV + Fecha Programada (misma NV con varios ítems autorizados para la misma fecha
+     de retiro/despacho cuenta como UNA sola fila, sumando lo autorizado — QPROG/QPROGVAL — de cada ítem).
+     Si la misma NV tiene ítems con fechas distintas, quedan en filas separadas. */
+  function agruparPorNVyFecha(rows){
+    const grupos = {};
+    rows.forEach(r => {
+      const key = r.nv + '|' + r.fechaProgramada.getTime();
+      if(!grupos[key]) grupos[key] = {...r, saldo:0, valor:0};
+      grupos[key].saldo += r.saldo;
+      grupos[key].valor += r.valor;
+      // conserva el mayor dias de atraso entre los items agrupados (deberia ser igual, misma fecha)
+      if(r.diasAtraso > grupos[key].diasAtraso) grupos[key].diasAtraso = r.diasAtraso;
+    });
+    return Object.values(grupos);
+  }
+  const retiroNoEfectuado = agruparPorNVyFecha(vencidas.filter(r=>r.retira==='Si').map(r=>mapVencida(r,'Retiro no efectuado'))).sort((a,b)=>b.diasAtraso-a.diasAtraso);
+  const despachoNoEfectuado = agruparPorNVyFecha(vencidas.filter(r=>r.despachar==='Si').map(r=>mapVencida(r,'Por despachar no efectuado'))).sort((a,b)=>b.diasAtraso-a.diasAtraso);
 
   function resumenSemanal(lista){
     const map = {};
@@ -3778,11 +3793,11 @@ function exportarNoEfectuadoExcel(rows, nombreArchivo, hojaNombre, conComunaCiud
   if(!rows.length){ alert('No hay datos para exportar.'); return; }
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(rows.map(r=>({
-    'NV': r.nv, 'Estado NV': r.nvEstado, 'Código': r.codigo, 'Producto': r.producto,
+    'NV': r.nv, 'Estado NV': r.nvEstado,
     'Cliente': r.cliente, 'Vendedor': r.vendedor,
     ...(conComunaCiudad ? {'Comuna': r.comuna||'', 'Ciudad': r.ciudad||''} : {}),
     'Fecha Programada': fmtFecha(r.fechaProgramada),
-    'Días de Atraso': r.diasAtraso, 'Saldo': r.saldo, 'Valor': r.valor, 'Estado': r.estado
+    'Días de Atraso': r.diasAtraso, 'Cantidad Autorizada': r.saldo, 'Valor Autorizado': r.valor, 'Estado': r.estado
   })));
   XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja(hojaNombre));
   XLSX.writeFile(wb, `${nombreArchivo}_${new Date().toISOString().slice(0,10)}.xlsx`);
