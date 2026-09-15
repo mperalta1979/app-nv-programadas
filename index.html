@@ -4467,7 +4467,7 @@ document.getElementById('btnEnviarEmailRetiro').addEventListener('click', () => 
   const contacto = CONTACTOS[neRetiroVendedorFiltro];
   if(!contacto || !contacto.length){ alert('No hay correo registrado para este vendedor.'); return; }
   const subject = encodeURIComponent(`NV Retiro Cliente sin retirar — ${neRetiroVendedorFiltro}`);
-  window.location.href = `mailto:${contacto[0].email}?subject=${subject}&body=${encodeURIComponent(msg)}`;
+  window.location.href = `mailto:${contacto[0].email}?cc=solicitud@petroflex.cl&subject=${subject}&body=${encodeURIComponent(msg)}`;
 });
 document.getElementById('btnGenerarReportePDF').addEventListener('click', generarReportePDF);
 document.getElementById('btnExportLpMaquinas').addEventListener('click', exportarLpMaquinasExcel);
