@@ -289,14 +289,26 @@
           <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
           <div class="filename" id="filename"></div>
         </div>
+        <div id="ultimaCargaNV" style="font-size:11.5px; color:var(--steel); margin:6px 0 20px;"></div>
 
-        <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin:20px 0 6px;">Programa de Producción</div>
+        <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin-bottom:6px;">Programa de Producción</div>
         <div id="prodUploadWrap" class="uploadbox hidden">
           <button class="uploadbtn" id="btnPickProd">Cargar Programa de Producción</button>
           <input type="file" id="fileInputProd" accept=".xlsx,.xls">
           <div class="uploadhint">Arrastra el Excel aquí o haz clic en el botón. Al cargar uno nuevo, se sincroniza automáticamente para TODOS los usuarios (reemplaza al anterior).</div>
           <div class="filename" id="filenameProd"></div>
         </div>
+        <div id="ultimaCargaProd" style="font-size:11.5px; color:var(--steel); margin:6px 0 20px;"></div>
+
+        <div style="font-weight:700; font-size:12.5px; color:var(--navy-deep); margin-bottom:6px;">Guías de Despacho (Query_Guias_de_Despacho.xlsx)</div>
+        <div id="guiasUploadWrap" class="uploadbox">
+          <button class="uploadbtn" id="btnPickGuias">Cargar Guías de Despacho</button>
+          <input type="file" id="fileInputGuias" accept=".xlsx,.xls">
+          <div class="uploadhint">Solo se guardan los últimos 15 días para no exceder el límite de la nube. Se usa para confirmar si una NV Retira Cliente / Por Despachar programada realmente salió.</div>
+          <div class="filename" id="filenameGuias"></div>
+        </div>
+        <div id="ultimaCargaGuias" style="font-size:11.5px; color:var(--steel); margin:6px 0;"></div>
+        <div id="guiasDatosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px; margin-top:8px;"></div>
       </div>
     </div>
 
@@ -332,19 +344,6 @@
         </div>
       </div>
       <div class="footer-note">Marca o desmarca los permisos de cada rol — se guardan y sincronizan al instante para todos los usuarios con ese rol. El nombre visible también es editable (haz clic y escribe).</div>
-    </div>
-
-    <div id="guiasPanel" class="panel">
-      <div class="panel-head"><h2>📄 Guías de Despacho (Query_Guias_de_Despacho.xlsx)</h2></div>
-      <div class="panel-body pad">
-        <div class="uploadbox" style="margin-bottom:12px;">
-          <button class="uploadbtn" id="btnPickGuias">Cargar Guías de Despacho</button>
-          <input type="file" id="fileInputGuias" accept=".xlsx,.xls">
-          <div class="uploadhint">Solo se guardan los últimos 15 días para no exceder el límite de la nube. Se usa para confirmar si una NV Retira Cliente / Por Despachar programada realmente salió.</div>
-          <div class="filename" id="filenameGuias"></div>
-        </div>
-        <div id="guiasDatosInfo" class="hidden" style="background:var(--celeste); border:1px solid var(--celeste-line); border-radius:8px; padding:10px 14px; font-size:12.5px;"></div>
-      </div>
     </div>
   </div>
 
@@ -1041,6 +1040,8 @@ function mostrarInfoProduccion(filename, savedAt){
   const el = document.getElementById('prodDatosInfo');
   if(!sesion || !tienePermiso('accesoMaestro')){ el.classList.add('hidden'); return; }
   const fecha = new Date(savedAt);
+  const ultimaCargaEl = document.getElementById('ultimaCargaProd');
+  if(ultimaCargaEl) ultimaCargaEl.innerHTML = textoUltimaCarga(filename, savedAt);
   el.innerHTML = `📌 Programa cargado: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')})` +
     ` <button class="btn btn-ghost" id="btnBorrarProduccion" style="padding:3px 10px; margin-left:8px;">Borrar</button>`;
   el.classList.remove('hidden');
@@ -1336,6 +1337,8 @@ function mostrarInfoGuias(filename, savedAt){
   const el = document.getElementById('guiasDatosInfo');
   if(!el) return;
   const fecha = new Date(savedAt);
+  const ultimaCargaEl = document.getElementById('ultimaCargaGuias');
+  if(ultimaCargaEl) ultimaCargaEl.innerHTML = textoUltimaCarga(filename, savedAt);
   el.innerHTML = `📌 Guías cargadas: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')}) — solo últimos ${VENTANA_GUIAS_DIAS} días.` +
     (tienePermiso('accesoMaestro') ? ` <button class="btn btn-ghost" id="btnBorrarGuias" style="padding:3px 10px; margin-left:8px;">Borrar</button>` : '');
   el.classList.remove('hidden');
@@ -1566,6 +1569,11 @@ function excelSerialToDate(v){
   const baseUTC = new Date(Date.UTC(1899,11,30) + n*86400000);
   if(baseUTC.getUTCFullYear() <= 1900) return null; // resguardo extra por si el serial es basura
   return new Date(baseUTC.getUTCFullYear(), baseUTC.getUTCMonth(), baseUTC.getUTCDate());
+}
+function textoUltimaCarga(filename, savedAt){
+  if(!savedAt) return '';
+  const fecha = new Date(savedAt);
+  return `📌 Última carga: <strong>${esc(filename||'(sin nombre)')}</strong> — ${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')}`;
 }
 function fmtFecha(d){
   if(!d) return '';
@@ -4233,6 +4241,8 @@ function mostrarInfoDatosGuardados(filename, savedAt){
   const fecha = new Date(savedAt);
   ultimaActualizacionISO = savedAt;
   actualizarBadgeUltimaActualizacion();
+  const ultimaCargaEl = document.getElementById('ultimaCargaNV');
+  if(ultimaCargaEl) ultimaCargaEl.innerHTML = textoUltimaCarga(filename, savedAt);
   el.innerHTML = `📌 Datos cargados: <strong>${esc(filename)}</strong> (${fmtFecha(fecha)} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')}) — se mantienen hasta que cargues un archivo nuevo.` +
     (sesion && tienePermiso('accesoMaestro') ?
       ` <button class="btn btn-ghost" id="btnExportarDatos" style="padding:3px 10px; margin-left:8px;">⬇ Exportar datos (respaldo)</button>` +
