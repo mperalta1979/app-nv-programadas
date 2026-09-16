@@ -540,25 +540,26 @@
   </div>
 
   <div id="tabCobertura" class="hidden">
-    <div class="section-title" id="programableSectionTitle">Programable — cobertura de stock disponible</div>
+    <div class="section-title">Cobertura de Stock Retira Cliente</div>
 
-    <div class="panel" id="panelCoberturaVendedor">
-      <div class="panel-head"><h2>Análisis de cobertura por vendedor</h2></div>
-      <div class="tabs" id="vendorTabs"></div>
-      <div class="seg" id="tipoSeg">
-        <button data-tipo="Retira Cliente" class="active">Programable Retira Cliente</button>
-        <button data-tipo="Por Despachar">Programable Por Despachar</button>
+    <div class="panel" id="panelCoberturaRetira">
+      <div class="panel-head">
+        <h2>📦 NV Retirables (stock B2 disponible, sin retiros parciales)</h2>
+        <button class="btn btn-export" id="btnExportCoberturaRetira">⬇ Exportar Excel</button>
       </div>
-      <div class="vendor-actions" id="vendorActions"></div>
       <div class="toolbar">
-        <input class="search" id="searchBox" placeholder="Buscar por código, producto, cliente o NV...">
+        <select id="crFiltroVendedor" style="padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;"></select>
+        <input class="search" id="crFiltroCliente" placeholder="Filtrar por cliente...">
+        <input class="search" id="crFiltroProducto" placeholder="Filtrar por código o producto...">
       </div>
+      <div class="vendor-actions" id="crAcciones"></div>
       <div class="panel-body">
         <div class="tablewrap">
-          <table id="vendorTable"></table>
+          <table id="coberturaRetiraTable"></table>
         </div>
       </div>
-      <div class="footer-note" id="vendorFootnote"></div>
+      <div class="footer-note" id="crFootnote"></div>
+      <div class="assumption-note">Una NV se marca RETIRABLE solo si el stock en Bodega 2 (B2) alcanza para el saldo completo de TODOS sus productos — no se muestran retiros parciales. El stock de B2 ya descuenta todo lo que está QPROG (programado) de ese código, sea para Retira o Despacho. Se excluyen NV retenidas por crédito y clientes bloqueados.</div>
     </div>
   </div>
 
@@ -1533,9 +1534,6 @@ let sesion = null; // {username, role, vendedor}
 let USERS = cargarUsuarios();
 
 let RESULT = null;
-let currentVendor = null;
-let currentTipo = 'Retira Cliente';
-let currentSearch = '';
 let currentNoProgTipo = 'Todos';
 let pdSearch = '';
 let pdVendedorFiltro = '__TODOS__';
@@ -2214,7 +2212,60 @@ function procesarDatos(rows){
       retenida: r.retenida, bloqueado: r.bloqueado, stock2: r.stock2, stock7: r.stock7
     }));
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion, nvSaldoCero, lineasParaProductivas, lineasParaFabricacionPosible };
+  /* -------- Cobertura de Stock Retira Cliente --------
+     Metodología: por cada código, stock neto = Stock_2 (B2, una vez por código) menos TODO el QPROG
+     ya programado de ese código (de cualquier línea, Retira o Despachar — ambos consumen el mismo stock
+     físico). Sobre ese stock neto, las líneas Retira Cliente vigentes (excluyendo retenidas y bloqueadas)
+     compiten en orden de NV ascendente: si el saldo completo de la línea cabe en lo que queda, se cubre;
+     si no, se pasa a la siguiente NV sin dejar retiros parciales. Una NV completa se marca "RETIRABLE"
+     solo si TODAS sus líneas Retira Cliente evaluadas quedaron cubiertas (no se ofrecen retiros parciales
+     de una orden). */
+  const stockNetoPorCodigo = {};
+  const qprogTotalPorCodigoCR = {};
+  vigentes.forEach(r => {
+    if(r.codigo === undefined || r.codigo === null || r.codigo === '') return;
+    qprogTotalPorCodigoCR[r.codigo] = (qprogTotalPorCodigoCR[r.codigo]||0) + (r.qprog||0);
+    if(stockNetoPorCodigo[r.codigo] === undefined) stockNetoPorCodigo[r.codigo] = r.stock2||0;
+  });
+  Object.keys(stockNetoPorCodigo).forEach(cod => {
+    stockNetoPorCodigo[cod] = Math.max(0, stockNetoPorCodigo[cod] - (qprogTotalPorCodigoCR[cod]||0));
+  });
+
+  const lineasRetiraCandidatas = disponibles.filter(r =>
+    r.retira === 'Si' && r.retenida !== 'Si' && r.saldo > 0 && r.codigo !== undefined && r.codigo !== null && r.codigo !== ''
+  );
+  const porCodigoRetira = {};
+  lineasRetiraCandidatas.forEach(r => {
+    if(!porCodigoRetira[r.codigo]) porCodigoRetira[r.codigo] = [];
+    porCodigoRetira[r.codigo].push(r);
+  });
+  const lineasEvaluadas = [];
+  Object.keys(porCodigoRetira).forEach(cod => {
+    const arr = porCodigoRetira[cod].slice().sort((a,b)=>a.nv-b.nv);
+    let stockRestante = stockNetoPorCodigo[cod] || 0;
+    arr.forEach(r => {
+      const cubierta = r.saldo <= stockRestante;
+      if(cubierta) stockRestante -= r.saldo;
+      lineasEvaluadas.push({...r, cubierta});
+    });
+  });
+  const porNVRetira = {};
+  lineasEvaluadas.forEach(r => {
+    if(!porNVRetira[r.nv]) porNVRetira[r.nv] = {
+      nv:r.nv, nvEstado:r.nvEstado, cliente:r.cliente, vendedor:r.vendedor, fecha:r.fecha_dt,
+      lineas:[], saldoTotal:0, valorTotal:0, todasCubiertas:true
+    };
+    const g = porNVRetira[r.nv];
+    g.lineas.push({codigo:r.codigo, producto:r.producto, saldo:r.saldo, valor:r.saldoValor, cubierta:r.cubierta});
+    g.saldoTotal += r.saldo;
+    g.valorTotal += r.saldoValor;
+    if(!r.cubierta) g.todasCubiertas = false;
+  });
+  const coberturaRetiraCliente = Object.values(porNVRetira)
+    .filter(g => g.todasCubiertas)
+    .sort((a,b)=>a.nv-b.nv);
+
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion, nvSaldoCero, lineasParaProductivas, lineasParaFabricacionPosible, coberturaRetiraCliente };
 }
 
 /* ============================================================
@@ -2262,7 +2313,6 @@ function render(){
   renderLineasProductivas();
   renderDashVendorTable();
   renderBloqueados();
-  renderTabs();
   renderRetenidas();
   aplicarPermisosPanelesAnalisis();
   aplicarPermisosMaestro();
@@ -2271,10 +2321,8 @@ function render(){
     renderProgramaDespacho();
     renderNoEfectuados();
   }
-  if(!currentVendor && RESULT.vendedoresConDatos.length){
-    currentVendor = RESULT.vendedoresConDatos[0];
-  }
-  renderVendorPanel();
+  renderFiltroVendedorCobertura();
+  renderCoberturaRetiraCliente();
 }
 
 function dashboardParaVendedorActual(){
@@ -2748,113 +2796,95 @@ function renderBloqueados(){
     </tbody>`;
 }
 
-function renderTabs(){
-  const tabsEl = document.getElementById('vendorTabs');
-  const resumen = RESULT.resumenPorTipo[currentTipo] || [];
-  const countsByVendor = {};
-  resumen.forEach(r=>countsByVendor[r.vendedor]=r.nvTotal);
-  tabsEl.innerHTML = RESULT.vendedoresConDatos.map(v => `
-    <div class="tab ${v===currentVendor?'active':''}" data-v="${esc(v)}">
-      ${esc(v)} <span class="count">(${countsByVendor[v]||0})</span>
-    </div>
-  `).join('');
-  tabsEl.querySelectorAll('.tab').forEach(t => {
-    t.addEventListener('click', () => {
-      currentVendor = t.getAttribute('data-v');
-      renderTabs();
-      renderVendorPanel();
-    });
-  });
-
-  document.querySelectorAll('#tipoSeg button').forEach(b=>{
-    b.classList.toggle('active', b.getAttribute('data-tipo')===currentTipo);
-    b.onclick = () => {
-      currentTipo = b.getAttribute('data-tipo');
-      renderResumenVendedor();
-      renderTabs();
-      renderVendorPanel();
-    };
-  });
+function renderFiltroVendedorCobertura(){
+  const sel = document.getElementById('crFiltroVendedor');
+  const actual = sel.value || '__TODOS__';
+  const vendedores = [...new Set(RESULT.coberturaRetiraCliente.map(r=>r.vendedor))].sort();
+  sel.innerHTML = `<option value="__TODOS__">Todos los vendedores</option>` +
+    vendedores.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if(vendedores.includes(actual) || actual==='__TODOS__') sel.value = actual;
 }
 
-function renderVendorPanel(){
-  const actionsEl = document.getElementById('vendorActions');
-  const contactos = CONTACTOS[currentVendor] || [];
-  const resumen = (RESULT.resumenPorTipo[currentTipo]||[]).find(r=>r.vendedor===currentVendor)
-                  || {completo:0, parcial:0, noCubre:0, valorCubierto:0, valorSinCubrir:0};
+function renderCoberturaRetiraCliente(){
+  const filtroVendedor = document.getElementById('crFiltroVendedor').value || '__TODOS__';
+  const filtroCliente = document.getElementById('crFiltroCliente').value.trim().toLowerCase();
+  const filtroProducto = document.getElementById('crFiltroProducto').value.trim().toLowerCase();
 
-  if(!contactos.length){
-    actionsEl.innerHTML = `<span class="pending-note">Sin contacto cargado para "${esc(currentVendor)}" — agrégalo en el objeto CONTACTOS del archivo.</span>
-      <button class="btn btn-export btn-ghost" id="btnExportVendor">⬇ Exportar esta pestaña</button>`;
+  let rows = RESULT.coberturaRetiraCliente;
+  if(filtroVendedor !== '__TODOS__') rows = rows.filter(r=>r.vendedor===filtroVendedor);
+  if(filtroCliente) rows = rows.filter(r=>(r.cliente||'').toLowerCase().includes(filtroCliente));
+  if(filtroProducto) rows = rows.filter(r=>r.lineas.some(l=>String(l.codigo).toLowerCase().includes(filtroProducto) || (l.producto||'').toLowerCase().includes(filtroProducto)));
+
+  if(!rows.length){
+    document.getElementById('coberturaRetiraTable').innerHTML = `<tbody><tr><td class="empty">No hay NV retirables con este filtro.</td></tr></tbody>`;
   } else {
-    const to = contactos.map(c=>c.email).join(',');
-    const subject = encodeURIComponent(`${currentTipo} vigentes - ${currentVendor}`);
-    const bodyLines = [
-      `Estimado/a,`, ``,
-      `Se adjunta la revisión de stock disponible en Bodega 2 para las NV vigentes (Aprobadas/Pendientes) tipo ${currentTipo} de ${currentVendor}.`,
-      `Resumen: ${resumen.completo} NV con cobertura completa, ${resumen.parcial} con cobertura parcial, ${resumen.noCubre} sin cobertura.`,
-      `Valor total cubierto: ${money(resumen.valorCubierto)}`, ``,
-      `Por favor revisar el detalle adjunto y gestionar según corresponda.`, ``, `Saludos,`
-    ];
-    const body = encodeURIComponent(bodyLines.join('\n'));
-    const mailto = `mailto:${to}?subject=${subject}&body=${body}`;
-    let html = `<a class="btn btn-mail" href="${mailto}">📧 Enviar correo (${contactos.map(c=>c.email).join(', ')})</a>`;
-    contactos.forEach(c => {
-      const waText = encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}, te comparto la revisión de NV ${currentTipo} vigentes, cualquier duda me avisas.`);
-      html += `<a class="btn btn-wa" target="_blank" href="https://wa.me/${c.cel}?text=${waText}">💬 WhatsApp ${esc(c.nombre)}</a>`;
-    });
-    html += `<button class="btn btn-export btn-ghost" id="btnExportVendor">⬇ Exportar esta pestaña</button>`;
-    actionsEl.innerHTML = html;
-  }
-  const btnExp = document.getElementById('btnExportVendor');
-  if(btnExp) btnExp.addEventListener('click', () => exportVendorExcel(currentVendor, currentTipo));
-
-  renderVendorTable();
-}
-
-function renderVendorTable(){
-  const rows = RESULT.analisis.filter(a => a.vendedor === currentVendor && a.tipo === currentTipo);
-  const q = currentSearch.trim().toLowerCase();
-  const filtered = q ? rows.filter(r =>
-    String(r.codigo).toLowerCase().includes(q) ||
-    String(r.producto||'').toLowerCase().includes(q) ||
-    String(r.cliente||'').toLowerCase().includes(q) ||
-    String(r.nv).includes(q)
-  ) : rows;
-
-  const badgeClass = e => e==='Cubre Completo' ? 'badge-completo' : e==='Cubre Parcial' ? 'badge-parcial' : 'badge-no';
-
-  if(!filtered.length){
-    document.getElementById('vendorTable').innerHTML = `<tbody><tr><td class="empty">Sin resultados para este filtro.</td></tr></tbody>`;
-  } else {
-    document.getElementById('vendorTable').innerHTML = `
-      <thead><tr>
-        <th>Código</th><th>Producto</th><th>NV</th><th>Fecha emisión</th><th>Cliente</th><th>Comuna</th><th>Operación</th>
-        <th>Saldo</th><th>Valor saldo</th><th>Stock disp. código</th>
-        <th>Cant. cubierta</th><th>Valor cubierto</th><th>Saldo sin cubrir</th><th>Valor sin cubrir</th><th>Estado</th>
-      </tr></thead>
+    document.getElementById('coberturaRetiraTable').innerHTML = `
+      <thead><tr><th>NV</th><th>Cliente</th><th>Vendedor</th><th>Fecha Emisión</th><th>Productos</th><th>Cantidad Total</th><th>Valor Total</th></tr></thead>
       <tbody>
-        ${filtered.map(r => `<tr>
-          <td>${esc(r.codigo)}</td>
-          <td>${esc(r.producto)}</td>
+        ${rows.map(r=>`<tr>
           <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span></td>
-          <td>${fmtFecha(r.fecha)}</td>
-          <td>${esc(r.cliente)}</td>
-          <td>${esc(r.comuna||'')}</td>
-          <td>${esc(r.operacion && r.operacion!=='0' ? r.operacion : '')}</td>
-          <td>${num(r.saldo)}</td>
-          <td>${money(r.saldoValor)}</td>
-          <td>${num(r.stockDisponibleCodigo)}</td>
-          <td>${num(r.cantidadCubierta)}</td>
-          <td>${money(r.valorCubierto)}</td>
-          <td>${num(r.saldoSinCubrir)}</td>
-          <td>${money(r.valorSinCubrir)}</td>
-          <td><span class="badge ${badgeClass(r.estado)}">${esc(r.estado)}</span></td>
+          <td>${esc(r.cliente)}</td><td>${esc(r.vendedor)}</td><td>${fmtFecha(r.fecha)}</td>
+          <td style="font-size:11.5px;">${r.lineas.map(l=>`${esc(l.codigo)} (${num(l.saldo)})`).join(', ')}</td>
+          <td>${num(r.saldoTotal)}</td><td>${money(r.valorTotal)}</td>
         </tr>`).join('')}
       </tbody>`;
   }
-  document.getElementById('vendorFootnote').textContent =
-    `${filtered.length} de ${rows.length} NV mostradas (${currentTipo}) · el número junto a cada NV indica su estado: A = Aprobada, P = Pendiente.`;
+  document.getElementById('crFootnote').textContent = `${rows.length} de ${RESULT.coberturaRetiraCliente.length} NV retirables mostradas.`;
+
+  const totalValor = rows.reduce((s,r)=>s+r.valorTotal,0);
+  const acciones = document.getElementById('crAcciones');
+  if(filtroVendedor === '__TODOS__' || !rows.length){
+    acciones.innerHTML = '';
+  } else {
+    const contactos = CONTACTOS[filtroVendedor] || [];
+    let html = '';
+    if(contactos.length){
+      contactos.forEach(c => {
+        const waText = encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}, tienes ${rows.length} NV con stock disponible para retiro (${money(totalValor)} en total). Ayúdanos a contactar a los clientes para que las retiren.`);
+        html += `<a class="btn btn-wa" target="_blank" href="https://wa.me/${c.cel}?text=${waText}">💬 WhatsApp ${esc(c.nombre)}</a>`;
+      });
+      const to = contactos.map(c=>c.email).join(',');
+      const subject = encodeURIComponent(`NV con stock disponible para retiro - ${filtroVendedor}`);
+      const bodyLines = [
+        `Estimado/a,`, ``,
+        `Tienes ${rows.length} NV con stock ya disponible en Bodega 2 para ser retiradas por tus clientes (total ${money(totalValor)}).`, ``,
+        ...rows.slice(0,20).map(r=>`- NV ${r.nv} — ${r.cliente} (${num(r.saldoTotal)}, ${money(r.valorTotal)})`),
+        rows.length>20 ? `...y ${rows.length-20} más.` : '', ``,
+        `Ayúdanos a contactar a los clientes para coordinar el retiro.`, ``, `Saludos,`
+      ].filter(Boolean);
+      const body = encodeURIComponent(bodyLines.join('\n'));
+      html += `<a class="btn btn-mail" href="mailto:${to}?cc=solicitud@petroflex.cl&subject=${subject}&body=${body}">📧 Enviar correo (${contactos.map(c=>c.email).join(', ')})</a>`;
+    } else {
+      html = `<span class="pending-note">Sin contacto cargado para "${esc(filtroVendedor)}" — agrégalo en el objeto CONTACTOS del archivo.</span>`;
+    }
+    acciones.innerHTML = html;
+  }
+}
+
+function exportarCoberturaRetiraExcel(){
+  const filtroVendedor = document.getElementById('crFiltroVendedor').value || '__TODOS__';
+  const filtroCliente = document.getElementById('crFiltroCliente').value.trim().toLowerCase();
+  const filtroProducto = document.getElementById('crFiltroProducto').value.trim().toLowerCase();
+  let rows = RESULT.coberturaRetiraCliente;
+  if(filtroVendedor !== '__TODOS__') rows = rows.filter(r=>r.vendedor===filtroVendedor);
+  if(filtroCliente) rows = rows.filter(r=>(r.cliente||'').toLowerCase().includes(filtroCliente));
+  if(filtroProducto) rows = rows.filter(r=>r.lineas.some(l=>String(l.codigo).toLowerCase().includes(filtroProducto) || (l.producto||'').toLowerCase().includes(filtroProducto)));
+  if(!rows.length){ alert('No hay datos para exportar con este filtro.'); return; }
+
+  const filas = [];
+  rows.forEach(r => {
+    r.lineas.forEach(l => {
+      filas.push({
+        'NV': r.nv, 'Estado NV': r.nvEstado, 'Cliente': r.cliente, 'Vendedor': r.vendedor,
+        'Fecha Emisión': fmtFecha(r.fecha), 'Código': l.codigo, 'Producto': l.producto,
+        'Cantidad': l.saldo, 'Valor': l.valor
+      });
+    });
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(filas);
+  XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja('Cobertura Retira Cliente'));
+  XLSX.writeFile(wb, `Cobertura_Stock_Retira_Cliente_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function renderRetenidas(){
@@ -4398,8 +4428,6 @@ function handleFile(file){
     mostrarInfoDatosGuardados(file.name, NV_ROWS_ACTUAL_RAW.savedAt);
     guardarDatosEnNube(rowsNuevo, file.name); // sincroniza para todos los usuarios (desplaza actual->anterior en la nube también)
     actualizarSeguimientoSinProgramar(); // revisa NV que llevan +3 días sin programar y avisa por ntfy si corresponde
-    currentVendor = null;
-    currentTipo = 'Retira Cliente';
     render();
   };
   reader.readAsArrayBuffer(file);
@@ -4412,7 +4440,10 @@ document.getElementById('fileInput').addEventListener('change', e => { if(e.targ
 ['dragleave','drop'].forEach(ev => uploadbox.addEventListener(ev, e => { e.preventDefault(); uploadbox.classList.remove('drag'); }));
 uploadbox.addEventListener('drop', e => { if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
 
-document.getElementById('searchBox').addEventListener('input', e => { currentSearch = e.target.value; renderVendorTable(); });
+document.getElementById('crFiltroVendedor').addEventListener('change', renderCoberturaRetiraCliente);
+document.getElementById('crFiltroCliente').addEventListener('input', renderCoberturaRetiraCliente);
+document.getElementById('crFiltroProducto').addEventListener('input', renderCoberturaRetiraCliente);
+document.getElementById('btnExportCoberturaRetira').addEventListener('click', exportarCoberturaRetiraExcel);
 
 document.getElementById('btnPickProd').addEventListener('click', () => document.getElementById('fileInputProd').click());
 document.getElementById('fileInputProd').addEventListener('change', e => { if(e.target.files[0]) handleFileProd(e.target.files[0]); });
