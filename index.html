@@ -2945,10 +2945,46 @@ function renderCoberturaRetiraCliente(){
       ].filter(Boolean);
       const body = encodeURIComponent(bodyLines.join('\n'));
       html += `<a class="btn btn-mail" href="mailto:${to}?cc=solicitud@petroflex.cl&subject=${subject}&body=${body}">📧 Enviar correo (${contactos.map(c=>c.email).join(', ')})</a>`;
+      html += `<button type="button" class="btn btn-ghost btn-compartir-excel-cr" style="padding:8px 14px;">📎 Compartir Excel</button>`;
     } else {
       html = `<span class="pending-note">Sin contacto cargado para "${esc(filtroVendedor)}" — agrégalo en el objeto CONTACTOS del archivo.</span>`;
     }
     acciones.innerHTML = html;
+    const btnCompartir = acciones.querySelector('.btn-compartir-excel-cr');
+    if(btnCompartir) btnCompartir.addEventListener('click', () => compartirExcelCoberturaRetira(detalleLineas, filtroVendedor));
+  }
+}
+
+function generarBlobExcelCoberturaRetira(detalleLineas){
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(detalleLineas.map(l => ({
+    'NV': l.nv, 'Cliente': l.cliente, 'Vendedor': l.vendedor, 'Código': l.codigo, 'Producto': l.producto,
+    'UM': l.um, 'Cantidad': l.cantidad, 'Valor': l.valor
+  })));
+  XLSX.utils.book_append_sheet(wb, ws, sanitizarNombreHoja('Disponible para Retiro'));
+  const arrayBuffer = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  return new Blob([arrayBuffer], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+
+async function compartirExcelCoberturaRetira(detalleLineas, vendedorNombre){
+  if(!detalleLineas.length){ alert('No hay datos para compartir.'); return; }
+  const blob = generarBlobExcelCoberturaRetira(detalleLineas);
+  const nombreArchivo = `NV_Disponibles_Retiro_${vendedorNombre.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  const file = new File([blob], nombreArchivo, {type: blob.type});
+
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{
+      await navigator.share({files:[file], title:'NV disponibles para retiro', text:`NV con stock disponible para retiro — ${vendedorNombre}`});
+    }catch(e){
+      if(e.name !== 'AbortError') console.warn('Error al compartir el archivo:', e);
+    }
+  } else {
+    alert('Tu navegador no soporta compartir archivos directamente (funciona mejor desde el celular). Se descargará el Excel para que lo envíes manualmente.');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nombreArchivo;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 }
 
