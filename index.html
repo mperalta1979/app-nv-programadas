@@ -544,7 +544,7 @@
 
     <div class="panel" id="panelCoberturaRetira">
       <div class="panel-head">
-        <h2>📦 NV Retirables (stock B2 disponible, sin retiros parciales)</h2>
+        <h2>📦 NV con stock disponible para retiro (sin retiros parciales por línea)</h2>
         <button class="btn btn-export" id="btnExportCoberturaRetira">⬇ Exportar Excel</button>
       </div>
       <div class="toolbar">
@@ -559,7 +559,42 @@
         </div>
       </div>
       <div class="footer-note" id="crFootnote"></div>
-      <div class="assumption-note">Una NV se marca RETIRABLE solo si el stock en Bodega 2 (B2) alcanza para el saldo completo de TODOS sus productos — no se muestran retiros parciales. El stock de B2 ya descuenta todo lo que está QPROG (programado) de ese código, sea para Retira o Despacho. Se excluyen NV retenidas por crédito y clientes bloqueados.</div>
+      <div class="assumption-note">Cada línea (código) se evalúa por separado: si el stock alcanza para el 100% de lo pedido queda "Retirable"; si alcanza para parte, queda "Parcial" (valorizado solo por lo disponible); si no hay nada, "Sin stock" — no se ofrecen retiros parciales de una misma línea. El stock de B2 ya descuenta todo lo que está QPROG (programado) de ese código, sea para Retira o Despacho. Se excluyen NV retenidas por crédito y clientes bloqueados.</div>
+    </div>
+
+    <div class="panel" id="panelCoberturaResumenVendedor">
+      <div class="panel-head"><h2>Resumen por Vendedor</h2></div>
+      <div class="panel-body pad">
+        <div style="display:flex; flex-wrap:wrap; gap:24px; justify-content:center; align-items:flex-start;">
+          <div style="flex:1; min-width:260px; max-width:340px;">
+            <svg id="pieCRVendedor" viewBox="0 0 260 260" style="width:100%; max-width:260px; display:block; margin:0 auto;"></svg>
+            <div id="pieCRVendedorLegend" style="font-size:11.5px; margin-top:10px;"></div>
+          </div>
+          <div style="flex:2; min-width:300px;">
+            <div class="tablewrap">
+              <table id="crResumenVendedorTable"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panelCoberturaResumenCliente">
+      <div class="panel-head"><h2>Resumen por Cliente</h2></div>
+      <div class="panel-body pad">
+        <div style="display:flex; flex-wrap:wrap; gap:24px; justify-content:center; align-items:flex-start;">
+          <div style="flex:1; min-width:260px; max-width:340px;">
+            <svg id="pieCRCliente" viewBox="0 0 260 260" style="width:100%; max-width:260px; display:block; margin:0 auto;"></svg>
+            <div id="pieCRClienteLegend" style="font-size:11.5px; margin-top:10px;"></div>
+          </div>
+          <div style="flex:2; min-width:300px;">
+            <div class="tablewrap">
+              <table id="crResumenClienteTable"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="assumption-note">Los gráficos muestran el valor total disponible (Retirable + Parcial) por vendedor/cliente. Si hay más de 8, los de menor valor se agrupan en "Otros" — la tabla siempre muestra el detalle completo.</div>
     </div>
   </div>
 
@@ -2239,33 +2274,63 @@ function procesarDatos(rows){
     if(!porCodigoRetira[r.codigo]) porCodigoRetira[r.codigo] = [];
     porCodigoRetira[r.codigo].push(r);
   });
+  // Por cada línea: RETIRABLE (stock cubre el 100% pedido), PARCIAL (hay algo de stock pero no todo) o
+  // NO_DISPONIBLE (sin stock) — el "sin parciales" aplica a nivel de línea/código, no de la NV completa:
+  // una NV con 5 ítems puede tener 3 retirables y 2 sin stock, y los 3 igual se muestran como tal.
   const lineasEvaluadas = [];
   Object.keys(porCodigoRetira).forEach(cod => {
     const arr = porCodigoRetira[cod].slice().sort((a,b)=>a.nv-b.nv);
     let stockRestante = stockNetoPorCodigo[cod] || 0;
     arr.forEach(r => {
-      const cubierta = r.saldo <= stockRestante;
-      if(cubierta) stockRestante -= r.saldo;
-      lineasEvaluadas.push({...r, cubierta});
+      const valorUnitario = r.saldoValor / (r.saldo || 1);
+      let estado, cantidadDisponible, valorDisponible;
+      if(stockRestante <= 0){
+        estado = 'no_disponible'; cantidadDisponible = 0; valorDisponible = 0;
+      } else if(r.saldo <= stockRestante){
+        estado = 'retirable'; cantidadDisponible = r.saldo; valorDisponible = r.saldoValor;
+        stockRestante -= r.saldo;
+      } else {
+        estado = 'parcial'; cantidadDisponible = stockRestante; valorDisponible = stockRestante * valorUnitario;
+        stockRestante = 0;
+      }
+      lineasEvaluadas.push({...r, estado, cantidadDisponible, valorDisponible});
     });
   });
   const porNVRetira = {};
   lineasEvaluadas.forEach(r => {
     if(!porNVRetira[r.nv]) porNVRetira[r.nv] = {
       nv:r.nv, nvEstado:r.nvEstado, cliente:r.cliente, vendedor:r.vendedor, fecha:r.fecha_dt,
-      lineas:[], saldoTotal:0, valorTotal:0, todasCubiertas:true
+      lineas:[], valorRetirable:0, valorParcial:0, valorNoDisponible:0, tieneAlgoDisponible:false
     };
     const g = porNVRetira[r.nv];
-    g.lineas.push({codigo:r.codigo, producto:r.producto, saldo:r.saldo, valor:r.saldoValor, cubierta:r.cubierta});
-    g.saldoTotal += r.saldo;
-    g.valorTotal += r.saldoValor;
-    if(!r.cubierta) g.todasCubiertas = false;
+    g.lineas.push({
+      codigo:r.codigo, producto:r.producto, saldoPedido:r.saldo, valorPedido:r.saldoValor,
+      estado:r.estado, cantidadDisponible:r.cantidadDisponible, valorDisponible:r.valorDisponible
+    });
+    if(r.estado==='retirable') g.valorRetirable += r.valorDisponible;
+    else if(r.estado==='parcial') g.valorParcial += r.valorDisponible;
+    else g.valorNoDisponible += r.saldoValor;
+    if(r.estado==='retirable' || r.estado==='parcial') g.tieneAlgoDisponible = true;
   });
   const coberturaRetiraCliente = Object.values(porNVRetira)
-    .filter(g => g.todasCubiertas)
+    .filter(g => g.tieneAlgoDisponible)
     .sort((a,b)=>a.nv-b.nv);
 
-  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion, nvSaldoCero, lineasParaProductivas, lineasParaFabricacionPosible, coberturaRetiraCliente };
+  function agruparResumenCR(campo){
+    const grupos = {};
+    coberturaRetiraCliente.forEach(r => {
+      const key = r[campo] || '(sin dato)';
+      if(!grupos[key]) grupos[key] = {nombre:key, cantidadNV:0, valorRetirable:0, valorParcial:0};
+      grupos[key].cantidadNV++;
+      grupos[key].valorRetirable += r.valorRetirable;
+      grupos[key].valorParcial += r.valorParcial;
+    });
+    return Object.values(grupos).map(g=>({...g, valorTotal:g.valorRetirable+g.valorParcial})).sort((a,b)=>b.valorTotal-a.valorTotal);
+  }
+  const coberturaRetiraPorVendedor = agruparResumenCR('vendedor');
+  const coberturaRetiraPorCliente = agruparResumenCR('cliente');
+
+  return { dashboard, dashboardPorVendedor, dashboardPorOperacion, noProgramadasNV, programaDespacho, stock: stockArr, analisis, retenidas, bloqueados, resumenPorTipo, vendedoresConDatos, resumenSituacionA, resumenSituacionP, noEfectuados, resumenRetailA, resumenRetailP, nvList, construirResumenSituacion, nvSaldoCero, lineasParaProductivas, lineasParaFabricacionPosible, coberturaRetiraCliente, coberturaRetiraPorVendedor, coberturaRetiraPorCliente };
 }
 
 /* ============================================================
@@ -2323,6 +2388,7 @@ function render(){
   }
   renderFiltroVendedorCobertura();
   renderCoberturaRetiraCliente();
+  renderResumenesCoberturaRetira();
 }
 
 function dashboardParaVendedorActual(){
@@ -2815,23 +2881,32 @@ function renderCoberturaRetiraCliente(){
   if(filtroCliente) rows = rows.filter(r=>(r.cliente||'').toLowerCase().includes(filtroCliente));
   if(filtroProducto) rows = rows.filter(r=>r.lineas.some(l=>String(l.codigo).toLowerCase().includes(filtroProducto) || (l.producto||'').toLowerCase().includes(filtroProducto)));
 
+  const ESTADO_LABEL = {retirable:'✅ Retirable', parcial:'🟡 Parcial', no_disponible:'🔴 Sin stock'};
+  const ESTADO_COLOR = {retirable:'#d7f0d9', parcial:'#fdf0c2', no_disponible:'#f5d9d6'};
+
   if(!rows.length){
-    document.getElementById('coberturaRetiraTable').innerHTML = `<tbody><tr><td class="empty">No hay NV retirables con este filtro.</td></tr></tbody>`;
+    document.getElementById('coberturaRetiraTable').innerHTML = `<tbody><tr><td class="empty">No hay NV con stock disponible para este filtro.</td></tr></tbody>`;
   } else {
     document.getElementById('coberturaRetiraTable').innerHTML = `
-      <thead><tr><th>NV</th><th>Cliente</th><th>Vendedor</th><th>Fecha Emisión</th><th>Productos</th><th>Cantidad Total</th><th>Valor Total</th></tr></thead>
+      <thead><tr><th>NV</th><th>Cliente</th><th>Vendedor</th><th>Fecha Emisión</th><th>Líneas (estado)</th><th>Valor Retirable</th><th>Valor Parcial</th></tr></thead>
       <tbody>
         ${rows.map(r=>`<tr>
           <td>${esc(r.nv)}<span class="tag tag-${r.nvEstado}">${esc(r.nvEstado)}</span></td>
           <td>${esc(r.cliente)}</td><td>${esc(r.vendedor)}</td><td>${fmtFecha(r.fecha)}</td>
-          <td style="font-size:11.5px;">${r.lineas.map(l=>`${esc(l.codigo)} (${num(l.saldo)})`).join(', ')}</td>
-          <td>${num(r.saldoTotal)}</td><td>${money(r.valorTotal)}</td>
+          <td style="font-size:11px;">${r.lineas.map(l=>
+            `<span style="background:${ESTADO_COLOR[l.estado]}; padding:1px 5px; border-radius:4px; display:inline-block; margin:1px 0;">
+              ${esc(l.codigo)} — ${ESTADO_LABEL[l.estado]} (${num(l.cantidadDisponible)} de ${num(l.saldoPedido)} pedidos)
+            </span>`
+          ).join('<br>')}</td>
+          <td>${money(r.valorRetirable)}</td>
+          <td>${r.valorParcial>0?money(r.valorParcial):'-'}</td>
         </tr>`).join('')}
       </tbody>`;
   }
-  document.getElementById('crFootnote').textContent = `${rows.length} de ${RESULT.coberturaRetiraCliente.length} NV retirables mostradas.`;
+  document.getElementById('crFootnote').textContent = `${rows.length} de ${RESULT.coberturaRetiraCliente.length} NV con algo disponible mostradas.`;
 
-  const totalValor = rows.reduce((s,r)=>s+r.valorTotal,0);
+  const totalRetirable = rows.reduce((s,r)=>s+r.valorRetirable,0);
+  const totalParcial = rows.reduce((s,r)=>s+r.valorParcial,0);
   const acciones = document.getElementById('crAcciones');
   if(filtroVendedor === '__TODOS__' || !rows.length){
     acciones.innerHTML = '';
@@ -2840,15 +2915,15 @@ function renderCoberturaRetiraCliente(){
     let html = '';
     if(contactos.length){
       contactos.forEach(c => {
-        const waText = encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}, tienes ${rows.length} NV con stock disponible para retiro (${money(totalValor)} en total). Ayúdanos a contactar a los clientes para que las retiren.`);
+        const waText = encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}, tienes ${rows.length} NV con stock disponible para retiro (${money(totalRetirable)} retirable + ${money(totalParcial)} parcial). Ayúdanos a contactar a los clientes para que las retiren.`);
         html += `<a class="btn btn-wa" target="_blank" href="https://wa.me/${c.cel}?text=${waText}">💬 WhatsApp ${esc(c.nombre)}</a>`;
       });
       const to = contactos.map(c=>c.email).join(',');
       const subject = encodeURIComponent(`NV con stock disponible para retiro - ${filtroVendedor}`);
       const bodyLines = [
         `Estimado/a,`, ``,
-        `Tienes ${rows.length} NV con stock ya disponible en Bodega 2 para ser retiradas por tus clientes (total ${money(totalValor)}).`, ``,
-        ...rows.slice(0,20).map(r=>`- NV ${r.nv} — ${r.cliente} (${num(r.saldoTotal)}, ${money(r.valorTotal)})`),
+        `Tienes ${rows.length} NV con stock ya disponible en Bodega 2 para ser retiradas por tus clientes (${money(totalRetirable)} retirable + ${money(totalParcial)} disponible parcial).`, ``,
+        ...rows.slice(0,20).map(r=>`- NV ${r.nv} — ${r.cliente} (Retirable: ${money(r.valorRetirable)}${r.valorParcial>0?', Parcial: '+money(r.valorParcial):''})`),
         rows.length>20 ? `...y ${rows.length-20} más.` : '', ``,
         `Ayúdanos a contactar a los clientes para coordinar el retiro.`, ``, `Saludos,`
       ].filter(Boolean);
@@ -2861,6 +2936,31 @@ function renderCoberturaRetiraCliente(){
   }
 }
 
+const PALETA_CR = ['#1F4E78','#2e75b6','#5b9bd5','#70ad47','#a9d18e','#ffc000','#ed7d31','#c00000','#7030a0','#375623'];
+function renderResumenCR(svgId, legendId, tablaId, filas, etiquetaCol){
+  const top = filas.slice(0, 8);
+  const resto = filas.slice(8);
+  const datosPie = top.map((f,i) => ({label: f.nombre, valor: f.valorTotal, color: PALETA_CR[i % PALETA_CR.length]}));
+  if(resto.length){
+    datosPie.push({label: `Otros (${resto.length})`, valor: resto.reduce((s,f)=>s+f.valorTotal,0), color:'#adb5bd'});
+  }
+  renderPieChart(svgId, legendId, datosPie);
+
+  document.getElementById(tablaId).innerHTML = filas.length ? `
+    <thead><tr><th>${etiquetaCol}</th><th>NV</th><th>Valor Retirable</th><th>Valor Parcial</th><th>Valor Total</th></tr></thead>
+    <tbody>
+      ${filas.map(f=>`<tr>
+        <td>${esc(f.nombre)}</td><td>${f.cantidadNV}</td>
+        <td>${money(f.valorRetirable)}</td><td>${f.valorParcial>0?money(f.valorParcial):'-'}</td>
+        <td><strong>${money(f.valorTotal)}</strong></td>
+      </tr>`).join('')}
+    </tbody>` : `<tbody><tr><td class="empty">Sin datos.</td></tr></tbody>`;
+}
+function renderResumenesCoberturaRetira(){
+  renderResumenCR('pieCRVendedor', 'pieCRVendedorLegend', 'crResumenVendedorTable', RESULT.coberturaRetiraPorVendedor, 'Vendedor');
+  renderResumenCR('pieCRCliente', 'pieCRClienteLegend', 'crResumenClienteTable', RESULT.coberturaRetiraPorCliente, 'Cliente');
+}
+
 function exportarCoberturaRetiraExcel(){
   const filtroVendedor = document.getElementById('crFiltroVendedor').value || '__TODOS__';
   const filtroCliente = document.getElementById('crFiltroCliente').value.trim().toLowerCase();
@@ -2871,13 +2971,15 @@ function exportarCoberturaRetiraExcel(){
   if(filtroProducto) rows = rows.filter(r=>r.lineas.some(l=>String(l.codigo).toLowerCase().includes(filtroProducto) || (l.producto||'').toLowerCase().includes(filtroProducto)));
   if(!rows.length){ alert('No hay datos para exportar con este filtro.'); return; }
 
+  const ESTADO_LABEL_XLS = {retirable:'Retirable', parcial:'Parcial', no_disponible:'Sin stock'};
   const filas = [];
   rows.forEach(r => {
     r.lineas.forEach(l => {
       filas.push({
         'NV': r.nv, 'Estado NV': r.nvEstado, 'Cliente': r.cliente, 'Vendedor': r.vendedor,
         'Fecha Emisión': fmtFecha(r.fecha), 'Código': l.codigo, 'Producto': l.producto,
-        'Cantidad': l.saldo, 'Valor': l.valor
+        'Cantidad Pedida': l.saldoPedido, 'Estado': ESTADO_LABEL_XLS[l.estado],
+        'Cantidad Disponible': l.cantidadDisponible, 'Valor Disponible': l.valorDisponible
       });
     });
   });
