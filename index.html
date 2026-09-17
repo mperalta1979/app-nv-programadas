@@ -2304,7 +2304,7 @@ function procesarDatos(rows){
     };
     const g = porNVRetira[r.nv];
     g.lineas.push({
-      codigo:r.codigo, producto:r.producto, saldoPedido:r.saldo, valorPedido:r.saldoValor,
+      codigo:r.codigo, producto:r.producto, um:r.um, saldoPedido:r.saldo, valorPedido:r.saldoValor,
       estado:r.estado, cantidadDisponible:r.cantidadDisponible, valorDisponible:r.valorDisponible
     });
     if(r.estado==='retirable') g.valorRetirable += r.valorDisponible;
@@ -2907,6 +2907,17 @@ function renderCoberturaRetiraCliente(){
 
   const totalRetirable = rows.reduce((s,r)=>s+r.valorRetirable,0);
   const totalParcial = rows.reduce((s,r)=>s+r.valorParcial,0);
+
+  // Detalle línea por línea (solo lo que SÍ tiene algo de stock: retirable o parcial)
+  const detalleLineas = [];
+  rows.forEach(r => {
+    r.lineas.filter(l=>l.estado==='retirable' || l.estado==='parcial').forEach(l => {
+      detalleLineas.push({nv:r.nv, cliente:r.cliente, vendedor:r.vendedor, codigo:l.codigo, producto:l.producto, um:l.um, cantidad:l.cantidadDisponible, valor:l.valorDisponible});
+    });
+  });
+  const fmtLineaDetalle = l => `NV ${l.nv} - ${l.codigo} ${l.producto} (${l.um}) - Cliente: ${l.cliente} - Vendedor: ${l.vendedor} - Cantidad: ${num(l.cantidad)} - Valor: ${money(l.valor)}`;
+  const CIERRE = `Usted debe hacer la solicitud de retiro formal a solicitud@petroflex.cl indicando el número de NV, el retiro no está confirmado hasta que reciba un correo con la autorización.-`;
+
   const acciones = document.getElementById('crAcciones');
   if(filtroVendedor === '__TODOS__' || !rows.length){
     acciones.innerHTML = '';
@@ -2914,18 +2925,23 @@ function renderCoberturaRetiraCliente(){
     const contactos = CONTACTOS[filtroVendedor] || [];
     let html = '';
     if(contactos.length){
+      const LIMITE_WA = 15;
+      const detalleWa = detalleLineas.slice(0, LIMITE_WA).map(fmtLineaDetalle).join('\n');
+      const extraWa = detalleLineas.length > LIMITE_WA ? `\n...y ${detalleLineas.length - LIMITE_WA} ítem(s) más.` : '';
       contactos.forEach(c => {
-        const waText = encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}, tienes ${rows.length} NV con stock disponible para retiro (${money(totalRetirable)} retirable + ${money(totalParcial)} parcial). Ayúdanos a contactar a los clientes para que las retiren.`);
-        html += `<a class="btn btn-wa" target="_blank" href="https://wa.me/${c.cel}?text=${waText}">💬 WhatsApp ${esc(c.nombre)}</a>`;
+        const waMsg = `Hola ${c.nombre.split(' ')[0]}, tienes ${rows.length} NV con stock disponible para retiro (${money(totalRetirable)} retirable + ${money(totalParcial)} parcial):\n\n${detalleWa}${extraWa}\n\n${CIERRE}`;
+        html += `<a class="btn btn-wa" target="_blank" href="https://wa.me/${c.cel}?text=${encodeURIComponent(waMsg)}">💬 WhatsApp ${esc(c.nombre)}</a>`;
       });
       const to = contactos.map(c=>c.email).join(',');
       const subject = encodeURIComponent(`NV con stock disponible para retiro - ${filtroVendedor}`);
+      const LIMITE_MAIL = 40;
+      const detalleMail = detalleLineas.slice(0, LIMITE_MAIL).map(l=>`- ${fmtLineaDetalle(l)}`);
+      const extraMail = detalleLineas.length > LIMITE_MAIL ? `...y ${detalleLineas.length - LIMITE_MAIL} ítem(s) más.` : '';
       const bodyLines = [
         `Estimado/a,`, ``,
-        `Tienes ${rows.length} NV con stock ya disponible en Bodega 2 para ser retiradas por tus clientes (${money(totalRetirable)} retirable + ${money(totalParcial)} disponible parcial).`, ``,
-        ...rows.slice(0,20).map(r=>`- NV ${r.nv} — ${r.cliente} (Retirable: ${money(r.valorRetirable)}${r.valorParcial>0?', Parcial: '+money(r.valorParcial):''})`),
-        rows.length>20 ? `...y ${rows.length-20} más.` : '', ``,
-        `Ayúdanos a contactar a los clientes para coordinar el retiro.`, ``, `Saludos,`
+        `Tienes ${rows.length} NV con stock ya disponible en Bodega 2 para ser retiradas por tus clientes (${money(totalRetirable)} retirable + ${money(totalParcial)} disponible parcial):`, ``,
+        ...detalleMail, extraMail, ``,
+        CIERRE, ``, `Saludos,`
       ].filter(Boolean);
       const body = encodeURIComponent(bodyLines.join('\n'));
       html += `<a class="btn btn-mail" href="mailto:${to}?cc=solicitud@petroflex.cl&subject=${subject}&body=${body}">📧 Enviar correo (${contactos.map(c=>c.email).join(', ')})</a>`;
